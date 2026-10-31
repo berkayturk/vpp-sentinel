@@ -37,7 +37,7 @@ class Telemetry(BaseModel):
     @field_validator("ts", mode="before")
     @classmethod
     def _ts_must_be_iso_string(cls, value: Any) -> Any:
-        if not isinstance(value, str):
+        if not isinstance(value, str | datetime):
             raise ValueError("timestamp must be an ISO 8601 string")
         return value
 
