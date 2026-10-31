@@ -20,15 +20,19 @@ groups:
             downstream decisions run on stale fleet state. The backlog grows while the single
             ingestion consumer cannot keep up with the publish rate. Compare the per-site
             message rate (vpp_ingest_messages_total by site) with the previous hour to find
-            where the extra volume comes from, and check the ingestion pod's memory and restarts.
+            where the extra volume comes from, and check whether the ingestion pod is CPU
+            throttled against its limit.
           runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/ingestion-lag-high.md
 
       - alert: VppSiteDevicesDark
         # More than a quarter of one site's devices of one type have not stored telemetry within
         # the 60 s freshness window. "for" outlasts the short dip the gauges show right after an
-        # ingestion restart, when the last-seen registry starts empty.
+        # ingestion restart, when the last-seen registry starts empty. The "unless" guard keeps
+        # the alert silent when more than half the whole fleet is missing: that is one
+        # fleet-wide fault (broker, database, consumer), not fifteen per-group ones.
         expr: |
           (vpp_devices_expected - vpp_devices_reporting) / vpp_devices_expected > 0.25
+            unless on() (sum(vpp_devices_reporting) / sum(vpp_devices_expected) < 0.5)
         for: 2m
         labels:
           severity: critical

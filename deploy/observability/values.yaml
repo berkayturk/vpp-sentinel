@@ -1,5 +1,5 @@
 # Demo values for a single-node kind cluster on a laptop. Nothing here is production-grade:
-# no persistence, short retention, demo credentials.
+# storage lives only as long as the cluster, retention is short, credentials are demo-only.
 
 kube-prometheus-stack:
   fullnameOverride: obs
@@ -47,7 +47,7 @@ kube-prometheus-stack:
           memory: 512Mi
         limits:
           memory: 1Gi
-      # Pick up every PrometheusRule in the namespace, not only those labelled with the release.
+      # Pick up every PrometheusRule in the cluster, not only those labelled with the release.
       ruleSelectorNilUsesHelmValues: false
       # The platform pods are discovered by annotation; no ServiceMonitor, so the platform chart
       # does not depend on the operator's CRDs.

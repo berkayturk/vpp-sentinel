@@ -115,12 +115,59 @@
       }
     },
     {
+      "id": 7,
+      "type": "timeseries",
+      "title": "CPU usage vs limit",
+      "description": "Ingestion container CPU against its limit, and the share of scheduler periods in which it was throttled. The single consumer is bounded by this limit.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"vpp\", container=\"ingestion\"}[1m]))",
+          "legendFormat": "cpu cores used"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(kube_pod_container_resource_limits{namespace=\"vpp\", container=\"ingestion\", resource=\"cpu\"})",
+          "legendFormat": "limit"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_cpu_cfs_throttled_periods_total{namespace=\"vpp\", container=\"ingestion\"}[1m])) / sum(rate(container_cpu_cfs_periods_total{namespace=\"vpp\", container=\"ingestion\"}[1m]))",
+          "legendFormat": "throttled share"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "min": 0, "decimals": 2 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "limit" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "throttled share" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": 5,
       "type": "timeseries",
       "title": "Container restarts",
       "description": "Restart count of the ingestion container, from kube-state-metrics.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
@@ -140,7 +187,7 @@
       "title": "Firing alerts",
       "description": "Alerts currently firing in Prometheus.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
       "targets": [
         {
           "refId": "A",

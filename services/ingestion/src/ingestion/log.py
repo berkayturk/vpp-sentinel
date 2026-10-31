@@ -34,6 +34,8 @@ def configure_logging(service: str, level: str = "INFO") -> None:
             foreign_pre_chain=pre_chain,
             processors=[
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                # Tracebacks become a list of frames under "exception", not a text blob.
+                structlog.processors.dict_tracebacks,
                 structlog.processors.JSONRenderer(),
             ],
         )
@@ -43,3 +45,12 @@ def configure_logging(service: str, level: str = "INFO") -> None:
     root.handlers = [handler]
     root.setLevel(level)
     structlog.contextvars.bind_contextvars(service=service)
+    # An exception that escapes the event loop would otherwise print a plain-text
+    # traceback to stderr, which the pod log merges with stdout.
+    sys.excepthook = _log_uncaught
+
+
+def _log_uncaught(exc_type, exc_value, exc_tb) -> None:
+    structlog.get_logger("process").critical(
+        "process.crashed", exc_info=(exc_type, exc_value, exc_tb)
+    )

@@ -30,7 +30,8 @@ tests:
                 downstream decisions run on stale fleet state. The backlog grows while the single
                 ingestion consumer cannot keep up with the publish rate. Compare the per-site
                 message rate (vpp_ingest_messages_total by site) with the previous hour to find
-                where the extra volume comes from, and check the ingestion pod's memory and restarts.
+                where the extra volume comes from, and check whether the ingestion pod is CPU
+                throttled against its limit.
               runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/ingestion-lag-high.md
       - eval_time: 3m
         alertname: VppSiteDevicesDark
@@ -103,9 +104,47 @@ tests:
       - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
         values: '30 30 30 0 0 0 30x24'
     alert_rule_test:
+      # Evaluated inside the dip: a rule without a long enough "for" fires here.
+      - eval_time: 50s
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
       - eval_time: 1m
         alertname: VppSiteDevicesDark
         exp_alerts: []
+      - eval_time: 4m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+
+  - name: slow restart of 90 s still does not fire
+    interval: 10s
+    input_series:
+      - series: 'vpp_devices_expected{site="como",device_type="charger"}'
+        values: '30x30'
+      # Migrations, fleet load and the first gauge refresh can stretch the dip.
+      - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
+        values: '30 30 30 0x9 30x18'
+    alert_rule_test:
+      - eval_time: 1m50s
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+
+  - name: fleet-wide outage raises no per-group alert
+    interval: 10s
+    input_series:
+      # Broker or database down: every group goes dark at once. That is one fault,
+      # and the per-group alert must not fan out into one alert per group.
+      - series: 'vpp_devices_expected{site="como",device_type="charger"}'
+        values: '30x30'
+      - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
+        values: '0x30'
+      - series: 'vpp_devices_expected{site="varese",device_type="battery"}'
+        values: '15x30'
+      - series: 'vpp_devices_reporting{site="varese",device_type="battery"}'
+        values: '0x30'
+    alert_rule_test:
       - eval_time: 4m
         alertname: VppSiteDevicesDark
         exp_alerts: []

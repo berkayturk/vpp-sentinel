@@ -8,8 +8,8 @@ FAULT    := NAMESPACE=$(NAMESPACE) deploy/scripts/fault.sh
 # Same Prometheus version kube-prometheus-stack installs; promtool comes from the same image.
 PROMTOOL := docker run --rm -v $(PWD)/deploy/observability/rules:/rules --entrypoint promtool prom/prometheus:v3.15.1
 
-.PHONY: help test lint fmt images demo down status incident-load-surge incident-firmware-drift incident-clear \
-        grafana prometheus alertmanager alerts alerts-test dashboards-check
+.PHONY: help test lint fmt images helm-deps demo down status incident-load-surge incident-firmware-drift \
+        incident-clear grafana prometheus alertmanager alerts alerts-test dashboards-check
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-24s %s\n", $$1, $$2}'
@@ -29,10 +29,14 @@ images: ## Build both service images with the :dev tag
 	docker build -f services/fleet-simulator/Dockerfile -t vpp-fleet-simulator:dev .
 	docker build -f services/ingestion/Dockerfile -t vpp-ingestion:dev .
 
-demo: images ## Create the kind cluster (if needed), deploy observability and the platform
+helm-deps: ## Fetch the observability chart's dependencies (adds the Helm repositories it needs)
+	helm repo add --force-update prometheus-community https://prometheus-community.github.io/helm-charts
+	helm repo add --force-update grafana https://grafana.github.io/helm-charts
+	helm dependency build deploy/observability
+
+demo: images helm-deps ## Create the kind cluster (if needed), deploy observability and the platform
 	@kind get clusters 2>/dev/null | grep -qx $(CLUSTER) || kind create cluster --config deploy/kind/cluster.yaml
 	kind load docker-image vpp-fleet-simulator:dev vpp-ingestion:dev --name $(CLUSTER)
-	helm dependency build deploy/observability
 	helm upgrade --install $(OBS_RELEASE) deploy/observability -n $(OBS_NAMESPACE) --create-namespace --wait --timeout 10m
 	helm upgrade --install $(RELEASE) deploy/chart -n $(NAMESPACE) --create-namespace --wait --timeout 5m
 	@# The :dev tag never changes, so a re-run must restart the pods to pick up freshly loaded images.

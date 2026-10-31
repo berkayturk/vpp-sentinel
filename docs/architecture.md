@@ -171,15 +171,20 @@ Alertmanager has a single route with a null receiver, grouped by alert name
 and site; the incident agent polls its API instead of receiving
 notifications. `make alerts` lists what is active.
 
-**Known gap.** If the ingestion pod disappears entirely, its gauges disappear
-with it and neither alert can fire; that failure belongs to the Kubernetes
-layer (readiness probes, the deployment controller), not to this alert set.
+**Known gap.** A fleet-wide outage is not this alert set's job. If the
+ingestion pod disappears entirely, its gauges disappear with it and neither
+alert can fire. If the pod is up but nothing is stored (broker or database
+down), every group goes dark at once; the dark alert is guarded so that it
+stays silent when more than half the fleet is missing, because one fault
+must not fan out into fifteen critical alerts. Both cases belong to the
+Kubernetes layer (readiness probes, the deployment controller) and to a
+fleet-level check that a later layer may add.
 
 ### Scenario behaviour (measured on a laptop kind cluster)
 
 - `make incident-load-surge` makes the 60 devices at lugano-south publish
   50× faster (every 100 ms) for 180 s. The ingestion pod's 100m CPU limit
-  caps the single consumer near 350 messages per second, so a backlog
+  caps the single consumer near 400 messages per second, so a backlog
   builds, mean lag crosses 30 s after about 95 s and `VppIngestionLagHigh`
   is active about 2.5 minutes after injection. Memory rises with the backlog
   but stays well below the limit. `kubectl -n vpp rollout restart

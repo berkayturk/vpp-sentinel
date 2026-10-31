@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 
 import structlog
 
@@ -38,3 +39,28 @@ def test_level_filter_applies_to_library_loggers(capsys):
     configure_logging("ingestion", "WARNING")
     logging.getLogger("asyncpg").info("hidden")
     assert capsys.readouterr().out.strip() == ""
+
+
+def test_exceptions_carry_a_structured_traceback(capsys):
+    configure_logging("ingestion", "INFO")
+    try:
+        raise ZeroDivisionError("division by zero")
+    except ZeroDivisionError:
+        logging.getLogger("asyncio").exception("Task exception was never retrieved")
+    record = _last_json_line(capsys)
+    assert record["event"] == "Task exception was never retrieved"
+    frames = record["exception"][0]["exc_type"], record["exception"][0]["frames"]
+    assert frames[0] == "ZeroDivisionError"
+    assert any(f["name"] == "test_exceptions_carry_a_structured_traceback" for f in frames[1])
+
+
+def test_uncaught_exception_is_logged_as_json(capsys):
+    configure_logging("ingestion", "INFO")
+    try:
+        raise RuntimeError("worker crashed")
+    except RuntimeError as exc:
+        sys.excepthook(type(exc), exc, exc.__traceback__)
+    record = _last_json_line(capsys)
+    assert record["event"] == "process.crashed"
+    assert record["level"] == "critical"
+    assert record["exception"][0]["exc_type"] == "RuntimeError"

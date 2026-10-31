@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Call the fleet simulator's control API through a short-lived port-forward.
-#   fault.sh POST   /faults/load-surge '{"site":"lugano-south","multiplier":10,"duration_seconds":180}'
+#   fault.sh POST   /faults/load-surge '{"site":"lugano-south","multiplier":50,"duration_seconds":180}'
 #   fault.sh DELETE /faults
 #   fault.sh GET    /faults
 set -euo pipefail

@@ -28,12 +28,25 @@ queued messages are lost (MQTT QoS 0).
    on that site (firmware roll-out, cadence misconfiguration, replayed
    backlog from devices that were offline).
 
-2. **Is the pod under memory pressure or restarting?** The *VPP ingestion
-   service* dashboard shows working-set memory against the limit and the
-   container restart count. A working set approaching the limit means the
-   in-memory queue is the backlog.
+2. **Is the pod CPU throttled?** The single consumer is bounded by the
+   pod's CPU limit (`deploy/chart/values.yaml`). The *VPP ingestion
+   service* dashboard shows CPU usage against the limit and the share of
+   throttled periods; or query:
 
-3. **Anything else wrong?** Warnings from the broker or the database:
+   ```promql
+   rate(container_cpu_cfs_throttled_periods_total{namespace="vpp", container="ingestion"}[1m])
+     / rate(container_cpu_cfs_periods_total{namespace="vpp", container="ingestion"}[1m])
+   ```
+
+   A throttled share near 1 means the consumer is running at its ceiling
+   and everything above it queues.
+
+3. **Is memory growing or the pod restarting?** The same dashboard shows
+   working-set memory against the limit and the container restart count.
+   The in-memory queue is the backlog; if it reaches the memory limit the
+   pod is OOM-killed and the queued messages are lost.
+
+4. **Anything else wrong?** Warnings from the broker or the database:
 
    ```logql
    {namespace="vpp", app="ingestion"} | json | level=~"warning|error"
@@ -47,9 +60,10 @@ Restart the ingestion deployment:
 kubectl -n vpp rollout restart deploy/ingestion
 ```
 
-This drops the in-memory backlog and reconnects to the broker. If the
-surge has ended or is ending, the mean lag falls below 30 s within about
-two minutes and the alert resolves.
+This discards the in-memory backlog (those queued samples are lost; the
+fleet publishes with QoS 0) and reconnects to the broker. If the surge has
+ended or is ending, the mean lag falls below 30 s within about two minutes
+and the alert resolves.
 
 **This is a mitigation, not a fix.** The consumer still processes
 messages one at a time; the next surge of the same size will reproduce
@@ -58,9 +72,9 @@ the alert.
 ## Escalate
 
 If the alert fires again within 30 minutes of a restart, do **not**
-restart again. Escalate to the platform team to review the memory limit
-and the consumer's parallelism (several consumer tasks, or batched
-inserts).
+restart again. Escalate to the platform team to review the pod's resource
+limits (CPU first, then memory) and the consumer's parallelism (several
+consumer tasks, or batched inserts).
 
 ## Afterwards
 
