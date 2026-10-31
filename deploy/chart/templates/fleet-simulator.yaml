@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleet-simulator
+  labels:
+    app.kubernetes.io/name: fleet-simulator
+    {{- include "vpp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fleet-simulator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fleet-simulator
+        {{- include "vpp.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: fleet-simulator
+          image: {{ .Values.images.fleetSimulator }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: MQTT_HOST
+              value: mosquitto
+            - name: MQTT_PORT
+              value: "1883"
+            - name: FLEET_CADENCE_SECONDS
+              value: {{ .Values.fleet.cadenceSeconds | quote }}
+            - name: CONTROL_PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: {{ .Values.fleet.logLevel | quote }}
+          ports:
+            - name: control
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: control
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-simulator
+  labels:
+    app.kubernetes.io/name: fleet-simulator
+    {{- include "vpp.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: fleet-simulator
+  ports:
+    - name: control
+      port: 8080
+      targetPort: control

@@ -1,0 +1,28 @@
+# Demo values. Everything here runs on a laptop inside kind; nothing is production-grade.
+
+images:
+  fleetSimulator: vpp-fleet-simulator:dev
+  ingestion: vpp-ingestion:dev
+  mosquitto: eclipse-mosquitto:2.0
+  postgres: postgres:16
+  pullPolicy: IfNotPresent
+
+fleet:
+  cadenceSeconds: 5
+  logLevel: INFO
+
+ingestion:
+  logLevel: INFO
+  # Deliberately tight: a load surge should be able to pressure this pod.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+postgres:
+  database: vpp
+  user: vpp
+  # Demo-only credential. It never leaves the kind cluster and is not a secret worth protecting.
+  password: vpp-demo-password
