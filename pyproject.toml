@@ -1,0 +1,10 @@
+[tool.uv.workspace]
+members = ["services/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".superpowers"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
