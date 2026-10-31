@@ -73,8 +73,8 @@ alerts-test: ## Check the alert rules and run their promtool unit tests
 dashboards-check: ## Validate the provisioned Grafana dashboards
 	python3 deploy/observability/dashboards/check.py
 
-incident-load-surge: ## Inject a 10x telemetry surge at lugano-south for 180 s
-	@$(FAULT) POST /faults/load-surge '{"site":"lugano-south","multiplier":10,"duration_seconds":180}'
+incident-load-surge: ## Inject a 50x telemetry surge at lugano-south for 180 s
+	@$(FAULT) POST /faults/load-surge '{"site":"lugano-south","multiplier":50,"duration_seconds":180}'
 
 incident-firmware-drift: ## Switch 40 % of como's chargers to firmware 2.4.0
 	@$(FAULT) POST /faults/firmware-drift '{"site":"como","device_type":"charger","fraction":0.4}'

@@ -18,7 +18,7 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
 | `make status` | Lists pods, active faults and active alerts |
 | `make grafana` | Opens Grafana on `localhost:3000` (admin / `vpp-demo-password`) |
 | `make alerts` | Lists active alerts |
-| `make incident-load-surge` | One site publishes telemetry 10× faster for 180 s |
+| `make incident-load-surge` | One site publishes telemetry 50× faster for 180 s |
 | `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |
 | `make down` | Deletes the kind cluster |

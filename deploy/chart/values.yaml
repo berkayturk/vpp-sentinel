@@ -13,12 +13,15 @@ fleet:
 
 ingestion:
   logLevel: INFO
-  # Deliberately tight: a load surge should be able to pressure this pod.
+  # Deliberately tight: a load surge should be able to pressure this pod. The single consumer
+  # stores roughly 4,000 messages per second per CPU core, so a 100m limit caps it near
+  # 400 messages per second; the fleet's normal rate is 60.
   resources:
     requests:
       cpu: 100m
       memory: 128Mi
     limits:
+      cpu: 100m
       memory: 256Mi
 
 postgres:
