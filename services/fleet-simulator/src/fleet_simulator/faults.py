@@ -1,6 +1,6 @@
 """Fault switches: immutable state plus the pure functions that interpret it.
 
-Two faults exist, matching the incident scenarios in the design document:
+Two faults exist, one per incident scenario the demo exercises:
 
 * ``load-surge`` — one site publishes ``multiplier`` times faster until a deadline.
 * ``firmware-drift`` — a fraction of one site's devices of one type report a

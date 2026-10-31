@@ -28,3 +28,6 @@ kubeconfig*
 
 # Plan execution scratch
 .superpowers/
+
+# Local planning notes, not part of the project
+docs/superpowers/

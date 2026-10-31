@@ -2,8 +2,7 @@
 
 Platform health and incident agent for distributed energy fleets.
 
-_Work in progress — see `docs/superpowers/specs/` for the design and
-`docs/architecture.md` for what is built so far._
+_Work in progress — see `docs/architecture.md` for what is built so far._
 
 ## Prerequisites
 
