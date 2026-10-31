@@ -31,3 +31,6 @@ kubeconfig*
 
 # Local planning notes, not part of the project
 docs/superpowers/
+
+# Helm dependency archives
+deploy/observability/charts/

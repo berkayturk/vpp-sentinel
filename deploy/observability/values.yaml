@@ -1,0 +1,224 @@
+# Demo values for a single-node kind cluster on a laptop. Nothing here is production-grade:
+# no persistence, short retention, demo credentials.
+
+kube-prometheus-stack:
+  fullnameOverride: obs
+
+  # The upstream rule pack (~100 alerts) is noise for this demo and would break the
+  # "one fault, one alert" rule. The repository ships its own rules (templates/prometheus-rules.yaml).
+  defaultRules:
+    create: false
+
+  # Components that do not exist or cannot be scraped on kind, or that this demo does not use.
+  nodeExporter:
+    enabled: false
+  kubeApiServer:
+    enabled: false
+  coreDns:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  # Kept: kubelet (cAdvisor memory) and kube-state-metrics (restarts, limits).
+  kubelet:
+    enabled: true
+  kubeStateMetrics:
+    enabled: true
+
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  prometheus:
+    prometheusSpec:
+      scrapeInterval: 10s
+      evaluationInterval: 10s
+      retention: 2d
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      # Pick up every PrometheusRule in the namespace, not only those labelled with the release.
+      ruleSelectorNilUsesHelmValues: false
+      # The platform pods are discovered by annotation; no ServiceMonitor, so the platform chart
+      # does not depend on the operator's CRDs.
+      additionalScrapeConfigs:
+        - job_name: vpp-pods
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: [vpp]
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              action: replace
+              target_label: __metrics_path__
+              regex: (.+)
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              replacement: $1:$2
+              target_label: __address__
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              target_label: app
+
+  alertmanager:
+    alertmanagerSpec:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+    # No notification channel: the incident agent polls the Alertmanager API.
+    config:
+      global:
+        resolve_timeout: 2m
+      inhibit_rules: []
+      route:
+        receiver: "null"
+        group_by: ["alertname", "site"]
+        group_wait: 10s
+        group_interval: 30s
+        repeat_interval: 4h
+      receivers:
+        - name: "null"
+
+  grafana:
+    fullnameOverride: grafana
+    # Demo-only credential; the instance is reachable only through kubectl port-forward.
+    adminPassword: vpp-demo-password
+    defaultDashboardsEnabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    sidecar:
+      datasources:
+        uid: prometheus
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki:3100
+
+loki:
+  fullnameOverride: loki
+  deploymentMode: SingleBinary
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+  singleBinary:
+    replicas: 1
+    # The container filesystem is read-only, so /var/loki needs a volume. kind's local-path
+    # storage class provides one; it is deleted with the cluster.
+    persistence:
+      enabled: true
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  gateway:
+    enabled: false
+  minio:
+    enabled: false
+  test:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  sidecar:
+    rules:
+      enabled: false
+
+alloy:
+  fullnameOverride: alloy
+  # Logs are read through the Kubernetes API (loki.source.kubernetes), so one replica is enough
+  # and no hostPath mount is needed.
+  controller:
+    type: deployment
+    replicas: 1
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    configMap:
+      content: |
+        discovery.kubernetes "vpp_pods" {
+          role = "pod"
+          namespaces {
+            names = ["vpp"]
+          }
+        }
+
+        discovery.relabel "vpp_pods" {
+          targets = discovery.kubernetes.vpp_pods.targets
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app"
+          }
+        }
+
+        loki.source.kubernetes "vpp_pods" {
+          targets    = discovery.relabel.vpp_pods.output
+          forward_to = [loki.write.default.receiver]
+        }
+
+        loki.write "default" {
+          endpoint {
+            url = "http://loki:3100/loki/api/v1/push"
+          }
+        }

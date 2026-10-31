@@ -1,0 +1,8 @@
+vpp-observability is installed in namespace {{ .Release.Namespace }}.
+
+Reach the UIs through port-forwards (or the Makefile targets of the same name):
+
+  make grafana       -> http://localhost:3000   (admin / {{ index .Values "kube-prometheus-stack" "grafana" "adminPassword" }})
+  make prometheus    -> http://localhost:9090
+  make alertmanager  -> http://localhost:9093
+  make alerts        -> lists active alerts

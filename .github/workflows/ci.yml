@@ -50,4 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - run: helm lint deploy/chart
+      - run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm dependency build deploy/observability
+      - run: helm lint deploy/chart deploy/observability
