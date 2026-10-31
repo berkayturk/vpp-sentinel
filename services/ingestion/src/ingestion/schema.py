@@ -17,7 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 DeviceType = Literal["charger", "battery", "inverter"]
 Status = Literal["charging", "idle", "discharging", "producing", "fault"]
-Reason = Literal["invalid_json", "invalid_timestamp", "missing_field", "invalid_value"]
+Reason = Literal[
+    "invalid_json", "invalid_timestamp", "missing_field", "invalid_value", "unknown_device"
+]
 
 
 class Telemetry(BaseModel):

@@ -29,3 +29,6 @@ packages = ["src/fleet_simulator"]
 addopts = "--cov=fleet_simulator --cov-fail-under=80"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = ["*/main.py", "*/log.py"]
