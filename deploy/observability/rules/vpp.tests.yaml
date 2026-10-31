@@ -1,0 +1,122 @@
+# promtool unit tests for vpp.rules.yaml. Run with `make alerts-test`.
+rule_files:
+  - vpp.rules.yaml
+evaluation_interval: 10s
+
+tests:
+  - name: all sites lagging raises one alert
+    interval: 10s
+    input_series:
+      # 10 samples per 10 s with 45 s of lag each → mean lag 45 s.
+      - series: 'vpp_ingest_lag_seconds_sum{site="lugano-south"}'
+        values: '0+450x30'
+      - series: 'vpp_ingest_lag_seconds_count{site="lugano-south"}'
+        values: '0+10x30'
+      - series: 'vpp_ingest_lag_seconds_sum{site="como"}'
+        values: '0+450x30'
+      - series: 'vpp_ingest_lag_seconds_count{site="como"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: VppIngestionLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ingestion
+            exp_annotations:
+              summary: "Telemetry is arriving late: mean ingestion lag is 45 s"
+              description: >-
+                Stored telemetry samples are on average more than 30 s old, so dashboards and
+                downstream decisions run on stale fleet state. The backlog grows while the single
+                ingestion consumer cannot keep up with the publish rate. Compare the per-site
+                message rate (vpp_ingest_messages_total by site) with the previous hour to find
+                where the extra volume comes from, and check the ingestion pod's memory and restarts.
+              runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/ingestion-lag-high.md
+      - eval_time: 3m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+
+  - name: healthy lag raises nothing
+    interval: 10s
+    input_series:
+      # 5 s mean lag.
+      - series: 'vpp_ingest_lag_seconds_sum{site="como"}'
+        values: '0+50x30'
+      - series: 'vpp_ingest_lag_seconds_count{site="como"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VppIngestionLagHigh
+        exp_alerts: []
+
+  - name: forty percent of a group dark fires for that group only
+    interval: 10s
+    input_series:
+      - series: 'vpp_devices_expected{site="como",device_type="charger"}'
+        values: '30x30'
+      - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
+        values: '18x30'
+      - series: 'vpp_devices_expected{site="varese",device_type="battery"}'
+        values: '15x30'
+      - series: 'vpp_devices_reporting{site="varese",device_type="battery"}'
+        values: '15x30'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: VppSiteDevicesDark
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: ingestion
+              site: como
+              device_type: charger
+            exp_annotations:
+              summary: "como: 40% of chargers have not reported for 60 s"
+              description: >-
+                Part of the fleet at como is invisible to the VPP, so dispatch
+                decisions for that site are unsafe. Check whether messages from those devices still
+                arrive but are rejected: compare vpp_ingest_rejects_total by reason and firmware over
+                the same window, and read the rejected samples in the ingestion logs. If nothing
+                arrives at all, look at the broker and the devices, not the parser.
+              runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/site-devices-dark.md
+      - eval_time: 3m
+        alertname: VppIngestionLagHigh
+        exp_alerts: []
+
+  - name: twenty percent dark is below threshold
+    interval: 10s
+    input_series:
+      - series: 'vpp_devices_expected{site="como",device_type="charger"}'
+        values: '30x30'
+      - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
+        values: '24x30'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+
+  - name: restart dip does not fire
+    interval: 10s
+    input_series:
+      - series: 'vpp_devices_expected{site="como",device_type="charger"}'
+        values: '30x30'
+      # The registry is empty for ~30 s after an ingestion restart.
+      - series: 'vpp_devices_reporting{site="como",device_type="charger"}'
+        values: '30 30 30 0 0 0 30x24'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+
+  - name: absent gauges raise nothing
+    interval: 10s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VppSiteDevicesDark
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: VppIngestionLagHigh
+        exp_alerts: []

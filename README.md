@@ -23,7 +23,8 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
 | `make incident-clear` | Switches every fault off |
 | `make down` | Deletes the kind cluster |
 
-Developer loop: `make test` and `make lint`.
+Developer loop: `make test`, `make lint` and `make alerts-test` (alert rules
+are unit-tested with promtool).
 
 ## A note on the planted fault
 

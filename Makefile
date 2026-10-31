@@ -5,9 +5,11 @@ RELEASE  := vpp-sentinel
 OBS_NAMESPACE := monitoring
 OBS_RELEASE := obs
 FAULT    := NAMESPACE=$(NAMESPACE) deploy/scripts/fault.sh
+# Same Prometheus version kube-prometheus-stack installs; promtool comes from the same image.
+PROMTOOL := docker run --rm -v $(PWD)/deploy/observability/rules:/rules --entrypoint promtool prom/prometheus:v3.15.1
 
 .PHONY: help test lint fmt images demo down status incident-load-surge incident-firmware-drift incident-clear \
-        grafana prometheus alertmanager alerts
+        grafana prometheus alertmanager alerts alerts-test
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-24s %s\n", $$1, $$2}'
@@ -63,6 +65,10 @@ alertmanager: ## Port-forward Alertmanager to http://localhost:9093
 
 alerts: ## List active alerts (one line each; empty when quiet)
 	@NAMESPACE=$(OBS_NAMESPACE) deploy/scripts/alerts.sh
+
+alerts-test: ## Check the alert rules and run their promtool unit tests
+	$(PROMTOOL) check rules /rules/vpp.rules.yaml
+	$(PROMTOOL) test rules /rules/vpp.tests.yaml
 
 incident-load-surge: ## Inject a 10x telemetry surge at lugano-south for 180 s
 	@$(FAULT) POST /faults/load-surge '{"site":"lugano-south","multiplier":10,"duration_seconds":180}'

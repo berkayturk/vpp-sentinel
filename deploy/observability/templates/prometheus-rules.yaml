@@ -1,0 +1,12 @@
+{{- /* The rules live as a plain Prometheus rules file in rules/ so promtool can check and
+       unit-test them; this template only wraps that file in the operator's CRD. */ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vpp-sentinel
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: vpp-sentinel
+    app.kubernetes.io/part-of: vpp-sentinel
+spec:
+  {{- .Files.Get "rules/vpp.rules.yaml" | nindent 2 }}

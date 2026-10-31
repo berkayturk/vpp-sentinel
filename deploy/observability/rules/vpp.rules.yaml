@@ -1,0 +1,44 @@
+# The two alerts the demo ships: one per incident scenario. Each fires on a symptom the
+# fleet operator cares about, has one owner action, and links to a runbook in this repository.
+groups:
+  - name: vpp-sentinel
+    rules:
+      - alert: VppIngestionLagHigh
+        # Mean age of stored telemetry over the last minute, across the whole fleet. There is one
+        # consumer, so a backlog delays every site at once; a per-site alert would fire five times
+        # for one fault. Per-site lag stays available on the metric for investigation.
+        expr: |
+          sum(rate(vpp_ingest_lag_seconds_sum[1m])) / sum(rate(vpp_ingest_lag_seconds_count[1m])) > 30
+        for: 1m
+        labels:
+          severity: warning
+          service: ingestion
+        annotations:
+          summary: "Telemetry is arriving late: mean ingestion lag is {{ $value | humanize }} s"
+          description: >-
+            Stored telemetry samples are on average more than 30 s old, so dashboards and
+            downstream decisions run on stale fleet state. The backlog grows while the single
+            ingestion consumer cannot keep up with the publish rate. Compare the per-site
+            message rate (vpp_ingest_messages_total by site) with the previous hour to find
+            where the extra volume comes from, and check the ingestion pod's memory and restarts.
+          runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/ingestion-lag-high.md
+
+      - alert: VppSiteDevicesDark
+        # More than a quarter of one site's devices of one type have not stored telemetry within
+        # the 60 s freshness window. "for" outlasts the short dip the gauges show right after an
+        # ingestion restart, when the last-seen registry starts empty.
+        expr: |
+          (vpp_devices_expected - vpp_devices_reporting) / vpp_devices_expected > 0.25
+        for: 2m
+        labels:
+          severity: critical
+          service: ingestion
+        annotations:
+          summary: "{{ $labels.site }}: {{ $value | humanizePercentage }} of {{ $labels.device_type }}s have not reported for 60 s"
+          description: >-
+            Part of the fleet at {{ $labels.site }} is invisible to the VPP, so dispatch
+            decisions for that site are unsafe. Check whether messages from those devices still
+            arrive but are rejected: compare vpp_ingest_rejects_total by reason and firmware over
+            the same window, and read the rejected samples in the ingestion logs. If nothing
+            arrives at all, look at the broker and the devices, not the parser.
+          runbook_url: https://github.com/berkayturk/vpp-sentinel/blob/main/docs/runbooks/site-devices-dark.md
