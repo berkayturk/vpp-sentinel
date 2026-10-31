@@ -9,7 +9,7 @@ FAULT    := NAMESPACE=$(NAMESPACE) deploy/scripts/fault.sh
 PROMTOOL := docker run --rm -v $(PWD)/deploy/observability/rules:/rules --entrypoint promtool prom/prometheus:v3.15.1
 
 .PHONY: help test lint fmt images demo down status incident-load-surge incident-firmware-drift incident-clear \
-        grafana prometheus alertmanager alerts alerts-test
+        grafana prometheus alertmanager alerts alerts-test dashboards-check
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-24s %s\n", $$1, $$2}'
@@ -69,6 +69,9 @@ alerts: ## List active alerts (one line each; empty when quiet)
 alerts-test: ## Check the alert rules and run their promtool unit tests
 	$(PROMTOOL) check rules /rules/vpp.rules.yaml
 	$(PROMTOOL) test rules /rules/vpp.tests.yaml
+
+dashboards-check: ## Validate the provisioned Grafana dashboards
+	python3 deploy/observability/dashboards/check.py
 
 incident-load-surge: ## Inject a 10x telemetry surge at lugano-south for 180 s
 	@$(FAULT) POST /faults/load-surge '{"site":"lugano-south","multiplier":10,"duration_seconds":180}'

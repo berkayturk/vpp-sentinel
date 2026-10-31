@@ -1,0 +1,18 @@
+{{- /* One ConfigMap per dashboard JSON; Grafana's sidecar loads every ConfigMap carrying the
+       grafana_dashboard label. The JSON files stay plain so they can be checked without Helm. */ -}}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $name := trimSuffix ".json" (base $path) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: vpp-sentinel
+    app.kubernetes.io/part-of: vpp-sentinel
+data:
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}

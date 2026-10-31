@@ -57,6 +57,12 @@ jobs:
           ./promtool check rules deploy/observability/rules/vpp.rules.yaml
           ./promtool test rules deploy/observability/rules/vpp.tests.yaml
 
+  dashboards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 deploy/observability/dashboards/check.py
+
   helm-lint:
     runs-on: ubuntu-latest
     steps:
