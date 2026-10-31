@@ -1,17 +1,26 @@
 """Prometheus metrics exposed by the ingestion service.
 
-Label sets are kept bounded: ``site`` and ``device_type`` come from a fixed
-fleet, ``result`` and ``reason`` from closed enumerations, and ``firmware``
-from the handful of versions a fleet runs. Device ids are never labels.
+Label sets are kept bounded. ``site`` and ``device_type`` come from the
+registered fleet (callers pass the ``(site, device_type)`` group they looked
+up), ``result`` and ``reason`` are closed enumerations, and ``firmware`` must
+look like a semantic version or is collapsed to ``other``. Anything a
+publisher could invent is mapped to ``unknown``/``other``. Device ids are
+never labels.
 """
 
+import re
 from datetime import datetime
 
 from prometheus_client import Counter, Gauge, Histogram
 
 from ingestion.schema import ParseError, Telemetry
 
+Group = tuple[str, str]
+
 UNKNOWN_LABEL = "unknown"
+OTHER_LABEL = "other"
+KNOWN_DEVICE_TYPES = frozenset({"charger", "battery", "inverter"})
+FIRMWARE_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 MESSAGES_TOTAL = Counter(
     "vpp_ingest_messages_total",
@@ -45,19 +54,33 @@ DEVICES_EXPECTED = Gauge(
 )
 
 
-def record_stored(t: Telemetry, now: datetime) -> None:
-    MESSAGES_TOTAL.labels(t.site, t.device_type, "stored").inc()
+def _device_type_label(value: str | None) -> str:
+    return value if value in KNOWN_DEVICE_TYPES else UNKNOWN_LABEL
+
+
+def _firmware_label(value: str | None) -> str:
+    if value is None:
+        return UNKNOWN_LABEL
+    return value if FIRMWARE_PATTERN.match(value) else OTHER_LABEL
+
+
+def record_stored(t: Telemetry, group: Group, now: datetime) -> None:
+    MESSAGES_TOTAL.labels(*group, "stored").inc()
     LAG_SECONDS.observe(max(0.0, (now - t.ts).total_seconds()))
 
 
-def record_duplicate(t: Telemetry) -> None:
-    MESSAGES_TOTAL.labels(t.site, t.device_type, "duplicate").inc()
+def record_duplicate(group: Group) -> None:
+    MESSAGES_TOTAL.labels(*group, "duplicate").inc()
+
+
+def record_store_error(group: Group) -> None:
+    MESSAGES_TOTAL.labels(*group, "error").inc()
 
 
 def record_rejected(error: ParseError, site: str | None) -> None:
-    device_type = error.device_type or UNKNOWN_LABEL
-    firmware = error.firmware or UNKNOWN_LABEL
-    REJECTS_TOTAL.labels(error.reason, device_type, firmware).inc()
+    """``site`` must already be validated by the caller (a known site or ``None``)."""
+    device_type = _device_type_label(error.device_type)
+    REJECTS_TOTAL.labels(error.reason, device_type, _firmware_label(error.firmware)).inc()
     MESSAGES_TOTAL.labels(site or UNKNOWN_LABEL, device_type, "rejected").inc()
 
 
@@ -65,9 +88,7 @@ def observe_db_write(seconds: float) -> None:
     DB_WRITE_SECONDS.observe(seconds)
 
 
-def publish_gauges(
-    counts: dict[tuple[str, str], int], expected: dict[tuple[str, str], int]
-) -> None:
+def publish_gauges(counts: dict[Group, int], expected: dict[Group, int]) -> None:
     for (site, device_type), value in counts.items():
         DEVICES_REPORTING.labels(site, device_type).set(value)
     for (site, device_type), value in expected.items():

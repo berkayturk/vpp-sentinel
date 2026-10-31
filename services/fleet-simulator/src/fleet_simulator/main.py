@@ -11,6 +11,7 @@ from fleet_simulator.faults import FaultState
 from fleet_simulator.fleet import DEFAULT_FLEET, build_fleet
 from fleet_simulator.log import configure_logging
 from fleet_simulator.publisher import run_publisher
+from fleet_simulator.runtime import run_until_server_exits
 
 DEFAULT_MQTT_PORT = 1883
 DEFAULT_CADENCE_SECONDS = 5.0
@@ -35,7 +36,8 @@ async def serve() -> None:
     server = uvicorn.Server(
         uvicorn.Config(app, host="0.0.0.0", port=control_port, log_level="warning")  # noqa: S104
     )
-    await asyncio.gather(
+    # uvicorn owns SIGTERM; when it exits, the publisher is cancelled with it.
+    await run_until_server_exits(
         server.serve(),
         run_publisher(broker_host, broker_port, fleet, app.state.get_faults, cadence),
     )

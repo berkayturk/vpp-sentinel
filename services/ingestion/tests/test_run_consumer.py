@@ -5,6 +5,7 @@ import pytest
 
 from ingestion import consumer as consumer_module
 from ingestion.consumer import run_consumer
+from ingestion.fleet_index import FleetIndex
 from ingestion.schema import Telemetry
 from ingestion.store import InsertResult
 
@@ -83,8 +84,11 @@ async def test_reconnects_with_backoff_and_keeps_consuming(monkeypatch: pytest.M
     monkeypatch.setattr(consumer_module.asyncio, "sleep", fake_sleep)
     store = FakeStore()
 
+    fleet = FleetIndex(
+        devices={"como-charger-001": ("como", "charger")}, expected={("como", "charger"): 1}
+    )
     with pytest.raises(StopConsumer):
-        await run_consumer("broker", 1883, store, on_ready=lambda: ready_calls.append(None))
+        await run_consumer("broker", 1883, store, fleet, on_ready=lambda: ready_calls.append(None))
 
     assert broker.attempts == 3
     assert broker.subscriptions == ["vpp/#"]
