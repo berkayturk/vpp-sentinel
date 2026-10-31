@@ -18,8 +18,15 @@ _Work in progress — see `docs/superpowers/specs/` for the design and
 | `make demo` | Builds the images, creates the `vpp-sentinel` kind cluster if needed and deploys the platform |
 | `make status` | Lists pods and shows the active faults |
 | `make incident-load-surge` | One site publishes telemetry 10× faster for 180 s |
-| `make incident-firmware-drift` | 40 % of one site's chargers switch to a firmware whose payload the ingestion parser rejects |
+| `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |
 | `make down` | Deletes the kind cluster |
 
 Developer loop: `make test` and `make lint`.
+
+## A note on the planted fault
+
+The platform ships with one deliberate code-level defect. The incident
+scenarios above expose it, and the incident agent is expected to find it
+from the observability signals alone and propose the fix as a pull request.
+This README does not say what the defect is; the agent's report will.

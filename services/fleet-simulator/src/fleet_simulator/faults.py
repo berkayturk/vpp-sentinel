@@ -3,8 +3,8 @@
 Two faults exist, matching the incident scenarios in the design document:
 
 * ``load-surge`` — one site publishes ``multiplier`` times faster until a deadline.
-* ``firmware-drift`` — a fraction of one site's devices of one type report the
-  drifted firmware whose payload the ingestion parser rejects.
+* ``firmware-drift`` — a fraction of one site's devices of one type report a
+  newer firmware revision with a changed payload encoding.
 """
 
 from dataclasses import asdict, dataclass

@@ -36,12 +36,9 @@ def test_missing_field():
     assert e.device_type == "charger" and e.firmware == "2.3.1"
 
 
-def test_epoch_ms_timestamp_is_rejected():
-    # Known limitation: firmware 2.4.0 sends epoch milliseconds. The parser does not accept it.
-    drifted = GOOD.replace(b'"ts":"2026-10-31T14:05:00Z"', b'"ts":1793455500000').replace(
-        b'"2.3.1"', b'"2.4.0"'
-    )
-    assert parse_telemetry(drifted) == ParseError("invalid_timestamp", "charger", "2.4.0")
+def test_unparseable_timestamp_is_rejected():
+    garbled = GOOD.replace(b'"ts":"2026-10-31T14:05:00Z"', b'"ts":"yesterday"')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.3.1")
 
 
 def test_negative_energy_rejected():

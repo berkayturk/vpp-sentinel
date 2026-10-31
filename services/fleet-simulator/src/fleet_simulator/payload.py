@@ -1,7 +1,6 @@
 """MQTT topic and telemetry payload construction.
 
 Firmware ``2.4.0`` encodes ``ts`` as epoch milliseconds instead of ISO 8601.
-That is the payload drift the ingestion parser currently does not accept.
 """
 
 from datetime import UTC, datetime

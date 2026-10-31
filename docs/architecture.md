@@ -60,12 +60,6 @@ Topic: `vpp/{site}/{device_type}/{device_id}/telemetry`
 `soc_pct` is `null` for chargers and inverters. `status` is one of
 `charging`, `idle`, `discharging`, `producing`, `fault`.
 
-**Firmware 2.4.0** sends `ts` as an integer epoch in **milliseconds**
-(`1793455500000`). The ingestion parser accepts only ISO 8601 strings and
-rejects those messages with `reason="invalid_timestamp"`. This is a known,
-deliberate limitation: it is the code-level fault the incident agent is
-expected to find and fix.
-
 ## Ingestion service
 
 `services/ingestion`, Python 3.12, asyncio.

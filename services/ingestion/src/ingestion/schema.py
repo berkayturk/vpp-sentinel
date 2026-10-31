@@ -2,10 +2,6 @@
 
 ``parse_telemetry`` never raises on bad input: it returns a ``ParseError``
 whose ``reason`` is one of a small, bounded set so it can be a metric label.
-
-Known limitation: ``ts`` is accepted only as an ISO 8601 string. Devices on
-firmware 2.4.0 send it as an integer epoch in milliseconds and are rejected
-with ``invalid_timestamp``.
 """
 
 import json
