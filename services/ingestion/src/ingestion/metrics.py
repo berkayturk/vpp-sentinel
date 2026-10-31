@@ -2,7 +2,8 @@
 
 Label sets are kept bounded. ``site`` and ``device_type`` come from the
 registered fleet (callers pass the ``(site, device_type)`` group they looked
-up), ``result`` and ``reason`` are closed enumerations, and ``firmware`` must
+up; the lag histogram carries ``site`` alone, one series per site),
+``result`` and ``reason`` are closed enumerations, and ``firmware`` must
 look like a semantic version or is collapsed to ``other``. Anything a
 publisher could invent is mapped to ``unknown``/``other``. Device ids are
 never labels.
@@ -35,6 +36,7 @@ REJECTS_TOTAL = Counter(
 LAG_SECONDS = Histogram(
     "vpp_ingest_lag_seconds",
     "Age of a telemetry sample when it was stored (device timestamp to ingestion).",
+    ["site"],
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 120, 300),
 )
 DB_WRITE_SECONDS = Histogram(
@@ -65,8 +67,9 @@ def _firmware_label(value: str | None) -> str:
 
 
 def record_stored(t: Telemetry, group: Group, now: datetime) -> None:
+    site, _ = group
     MESSAGES_TOTAL.labels(*group, "stored").inc()
-    LAG_SECONDS.observe(max(0.0, (now - t.ts).total_seconds()))
+    LAG_SECONDS.labels(site).observe(max(0.0, (now - t.ts).total_seconds()))
 
 
 def record_duplicate(group: Group) -> None:

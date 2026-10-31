@@ -34,7 +34,7 @@ async def serve() -> None:
     )
 
     server = uvicorn.Server(
-        uvicorn.Config(app, host="0.0.0.0", port=control_port, log_level="warning")  # noqa: S104
+        uvicorn.Config(app, host="0.0.0.0", port=control_port, log_level="warning", log_config=None)  # noqa: S104
     )
     # uvicorn owns SIGTERM; when it exits, the publisher is cancelled with it.
     await run_until_server_exits(

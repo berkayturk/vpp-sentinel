@@ -31,4 +31,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-omit = ["*/main.py", "*/log.py"]
+omit = ["*/main.py"]

@@ -58,7 +58,7 @@ async def serve() -> None:
     readiness = _Readiness()
     app = create_app(lambda: readiness.ready)
     server = uvicorn.Server(
-        uvicorn.Config(app, host="0.0.0.0", port=http_port, log_level="warning")  # noqa: S104
+        uvicorn.Config(app, host="0.0.0.0", port=http_port, log_level="warning", log_config=None)  # noqa: S104
     )
     await run_until_server_exits(server.serve(), _worker(readiness))
 

@@ -38,12 +38,23 @@ def _messages(result: str, site: str = "como", device_type: str = "charger") -> 
     )
 
 
+def _lag_sum(site: str = "como") -> float:
+    return _sample("vpp_ingest_lag_seconds_sum", {"site": site})
+
+
 def test_stored_increments_counter_and_lag():
-    before_lag = _sample("vpp_ingest_lag_seconds_sum")
+    before_lag = _lag_sum()
     before = _messages("stored")
     record_stored(T, GROUP, NOW)
     assert _messages("stored") == before + 1
-    assert _sample("vpp_ingest_lag_seconds_sum") - before_lag >= 4.0
+    assert _lag_sum() - before_lag >= 4.0
+
+
+def test_lag_is_labelled_with_the_group_site():
+    before = _lag_sum("varese")
+    record_stored(T, ("varese", "battery"), NOW)
+    assert _lag_sum("varese") - before >= 4.0
+    assert _lag_sum("bellinzona") == 0.0
 
 
 def test_labels_come_from_the_group_not_the_payload():
@@ -53,9 +64,9 @@ def test_labels_come_from_the_group_not_the_payload():
 
 
 def test_future_timestamp_lag_is_clamped_to_zero():
-    before = _sample("vpp_ingest_lag_seconds_sum")
+    before = _lag_sum()
     record_stored(T.model_copy(update={"ts": NOW + timedelta(seconds=30)}), GROUP, NOW)
-    assert _sample("vpp_ingest_lag_seconds_sum") == before
+    assert _lag_sum() == before
 
 
 def test_duplicate_counts_under_its_own_result():
