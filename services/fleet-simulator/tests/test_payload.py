@@ -26,9 +26,16 @@ def test_topic_shape():
 def test_payload_normal_firmware_uses_iso_ts():
     d = Device("como-charger-001", "como", "charger", "2.3.1", 11.0, None, None)
     p = telemetry_payload(d, TS, 7.4, "charging", 12.5)
-    assert p["ts"] == "2026-10-31T14:05:00Z"
+    assert p["ts"] == "2026-10-31T14:05:00.000Z"
     assert p["soc_pct"] is None
     assert set(p) == PAYLOAD_FIELDS
+
+
+def test_payload_ts_keeps_millisecond_precision():
+    # Under a load surge devices publish several times per second; the timestamp must not collide.
+    d = Device("como-charger-001", "como", "charger", "2.3.1", 11.0, None, None)
+    p = telemetry_payload(d, TS.replace(microsecond=437_912), 7.4, "charging", 12.5)
+    assert p["ts"] == "2026-10-31T14:05:00.437Z"
 
 
 def test_payload_drifted_firmware_uses_epoch_ms():

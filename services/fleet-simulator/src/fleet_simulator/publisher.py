@@ -25,6 +25,7 @@ log = structlog.get_logger("fleet_simulator.publisher")
 SECONDS_PER_HOUR = 3600.0
 RECONNECT_INITIAL_SECONDS = 1.0
 RECONNECT_MAX_SECONDS = 30.0
+PENDING_CALLS_HEADROOM = 100
 VOLTAGE_JITTER_V = 3.0
 NOMINAL_VOLTAGE_V = 230.0
 
@@ -113,7 +114,11 @@ async def run_publisher(
     backoff = RECONNECT_INITIAL_SECONDS
     while True:
         try:
-            async with aiomqtt.Client(broker_host, broker_port) as client:
+            # Every device awaits its own publish, so in-flight calls legitimately reach fleet size.
+            threshold = len(fleet) + PENDING_CALLS_HEADROOM
+            async with aiomqtt.Client(
+                broker_host, broker_port, pending_calls_threshold=threshold
+            ) as client:
                 log.info("mqtt.connected", host=broker_host, port=broker_port, devices=len(fleet))
                 backoff = RECONNECT_INITIAL_SECONDS
                 publisher = _MqttPublisher(client)

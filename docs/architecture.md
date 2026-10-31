@@ -47,7 +47,7 @@ Topic: `vpp/{site}/{device_type}/{device_id}/telemetry`
   "device_id": "lugano-south-charger-001",
   "site": "lugano-south",
   "device_type": "charger",
-  "ts": "2026-10-31T14:05:00Z",
+  "ts": "2026-10-31T14:05:00.000Z",
   "firmware": "2.3.1",
   "status": "charging",
   "power_kw": 7.4,

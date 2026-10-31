@@ -10,6 +10,7 @@ import uvicorn
 from ingestion.api import create_app
 from ingestion.consumer import run_consumer
 from ingestion.log import configure_logging
+from ingestion.startup import wait_for
 from ingestion.store import PostgresStore, apply_migrations
 
 DEFAULT_MQTT_PORT = 1883
@@ -35,9 +36,9 @@ async def serve() -> None:
     http_port = int(os.getenv("HTTP_PORT", DEFAULT_HTTP_PORT))
     migrations_dir = Path(os.getenv("MIGRATIONS_DIR", DEFAULT_MIGRATIONS_DIR))
 
-    applied = await apply_migrations(dsn, migrations_dir)
+    applied = await wait_for(lambda: apply_migrations(dsn, migrations_dir))
     log.info("migrations.applied", files=applied)
-    store = await PostgresStore.connect(dsn)
+    store = await wait_for(lambda: PostgresStore.connect(dsn))
 
     readiness = _Readiness()
     app = create_app(lambda: readiness.ready)

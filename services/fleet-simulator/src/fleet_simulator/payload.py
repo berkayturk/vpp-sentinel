@@ -22,7 +22,8 @@ def _encode_ts(ts: datetime, firmware: str) -> str | int:
     utc = ts.astimezone(UTC)
     if firmware == DRIFTED_FIRMWARE:
         return int(utc.timestamp() * 1000)
-    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Millisecond precision: under a load surge a device publishes several times per second.
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 
 def telemetry_payload(
