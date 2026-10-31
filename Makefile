@@ -28,6 +28,9 @@ demo: images ## Create the kind cluster (if needed) and deploy the platform
 	@kind get clusters 2>/dev/null | grep -qx $(CLUSTER) || kind create cluster --config deploy/kind/cluster.yaml
 	kind load docker-image vpp-fleet-simulator:dev vpp-ingestion:dev --name $(CLUSTER)
 	helm upgrade --install $(RELEASE) deploy/chart -n $(NAMESPACE) --create-namespace --wait --timeout 5m
+	@# The :dev tag never changes, so a re-run must restart the pods to pick up freshly loaded images.
+	kubectl -n $(NAMESPACE) rollout restart deploy/fleet-simulator deploy/ingestion
+	kubectl -n $(NAMESPACE) rollout status deploy/fleet-simulator deploy/ingestion --timeout 3m
 	@echo
 	@echo "Platform is up. Inspect it with:"
 	@echo "  make status"

@@ -114,11 +114,10 @@ async def run_publisher(
     backoff = RECONNECT_INITIAL_SECONDS
     while True:
         try:
-            # Every device awaits its own publish, so in-flight calls legitimately reach fleet size.
-            threshold = len(fleet) + PENDING_CALLS_HEADROOM
-            async with aiomqtt.Client(
-                broker_host, broker_port, pending_calls_threshold=threshold
-            ) as client:
+            async with aiomqtt.Client(broker_host, broker_port) as client:
+                # Every device awaits its own publish, so in-flight calls legitimately reach
+                # fleet size; raise aiomqtt's warning threshold (an attribute, not a kwarg).
+                client.pending_calls_threshold = len(fleet) + PENDING_CALLS_HEADROOM
                 log.info("mqtt.connected", host=broker_host, port=broker_port, devices=len(fleet))
                 backoff = RECONNECT_INITIAL_SECONDS
                 publisher = _MqttPublisher(client)
