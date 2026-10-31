@@ -3,7 +3,12 @@ name = "vpp-fleet-simulator"
 version = "0.1.0"
 description = "Simulated fleet of EV chargers, batteries and solar inverters publishing telemetry over MQTT."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "aiomqtt>=2.3,<3",
+    "fastapi>=0.115,<1",
+    "structlog>=24.4,<26",
+    "uvicorn>=0.34,<1",
+]
 
 [dependency-groups]
 dev = [
