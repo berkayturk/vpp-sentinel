@@ -1,0 +1,11 @@
+# The authority the incident agent holds. The operator writes this file; the agent only
+# reads it. Change it through a pull request (see CODEOWNERS). Every tool checks it in code.
+actions:
+  restart_deployment:
+    namespace: vpp
+    names: [ingestion]
+    cooldown_minutes: 30
+pull_requests:
+  enabled: true
+  allowed_paths: [services/ingestion/]
+  forbidden_paths: [allowlist.yaml, services/agent/, .github/, CODEOWNERS]

@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [services/fleet-simulator, services/ingestion]
+        service: [services/fleet-simulator, services/ingestion, services/agent]
     services:
       postgres:
         image: postgres:16

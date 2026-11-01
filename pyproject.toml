@@ -10,4 +10,4 @@ extend-exclude = [".superpowers"]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fleet_simulator", "ingestion"]
+known-first-party = ["agent", "fleet_simulator", "ingestion"]

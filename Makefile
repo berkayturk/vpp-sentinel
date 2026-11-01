@@ -1,4 +1,4 @@
-SERVICES := services/fleet-simulator services/ingestion
+SERVICES := services/fleet-simulator services/ingestion services/agent
 CLUSTER  := vpp-sentinel
 NAMESPACE := vpp
 RELEASE  := vpp-sentinel

@@ -1,0 +1,6 @@
+# Paths the incident agent may never change on its own. The PR tool refuses diffs that touch
+# them (allowlist.yaml: pull_requests.forbidden_paths); this file is the second line of defence.
+/allowlist.yaml    @berkayturk
+/CODEOWNERS        @berkayturk
+/services/agent/   @berkayturk
+/.github/          @berkayturk
