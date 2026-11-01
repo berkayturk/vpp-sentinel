@@ -85,6 +85,7 @@ class ToolSet:
     report: IncidentReport | None = None
     tests_passed: bool = False
     _tools: list = field(default_factory=list, repr=False)
+    _pull_request: tuple | None = field(default=None, repr=False)
 
     @property
     def tools(self) -> list:
@@ -299,7 +300,7 @@ class ToolSet:
                 )
         except (WorkspaceError, ClientError) as exc:
             return await self._record("open_pull_request", args, f"ERROR: {exc}")
-        self._pull_request_url = pr.url
+        self._pull_request = (pr, clean_title, clean_body)
         return await self._record(
             "open_pull_request", args, f"ok: {pr.url}", stored_outcome=f"ok: {pr.url}"
         )
@@ -351,18 +352,33 @@ class ToolSet:
                 seen_before_reference=seen_before_reference,
                 mitigation_not_fix=mitigation_not_fix,
                 page_human=page_human,
-                pull_request_url=getattr(self, "_pull_request_url", None),
+                pull_request_url=self._pull_request[0].url if self._pull_request else None,
             )
         except ValueError as exc:
             return await self._record("file_report", {}, f"ERROR: invalid report: {exc}")
         self.report = report
+        rendered = render_markdown(report)
         try:
-            await self.deps.store.save_report(self.deps.incident.id, render_markdown(report))
+            await self.deps.store.save_report(self.deps.incident.id, rendered)
         except Exception as exc:
             return await self._record(
                 "file_report", {}, f"ERROR: could not store the report: {exc}"
             )
-        return await self._record("file_report", {}, "ok: report filed", stored_outcome="ok")
+        note = await self._append_report_to_pull_request(rendered)
+        return await self._record("file_report", {}, f"ok: report filed{note}", stored_outcome="ok")
+
+    async def _append_report_to_pull_request(self, rendered: str) -> str:
+        """The spec wants the report in the PR description; the PR is opened before the report."""
+        if self._pull_request is None:
+            return ""
+        pr, title, body = self._pull_request
+        try:
+            await github.update_pr(
+                self.deps.github, self.deps.repo, pr.number, title, f"{body}\n\n---\n\n{rendered}"
+            )
+        except ClientError as exc:
+            return f"; could not append it to the pull request ({exc})"
+        return "; appended to the pull request"
 
     # --- plumbing ----------------------------------------------------------------
 

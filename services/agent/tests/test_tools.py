@@ -323,3 +323,27 @@ async def test_restart_result_tells_whether_the_rollout_completed(setup):
     ts = await _toolset(setup)
     out = await ts.restart_deployment(name="ingestion")
     assert out.startswith("ok") and "rolled out" in out
+
+
+async def test_filed_report_is_appended_to_the_open_pull_request(setup):
+    rec = Recorder()
+    ts = await _toolset(setup, github=client(_github_router(rec)))
+    await ts.write_source_file(path="services/ingestion/tests/test_fix.py", content="x")
+    await ts.run_tests()
+    await ts.open_pull_request(title="Accept the new payload", body="Problem and change.")
+    await ts.file_report(
+        summary="s",
+        blast_radius="b",
+        hypothesis="h",
+        evidence=["e"],
+        verification=["v"],
+        recommended_action="r",
+        seen_before=False,
+        mitigation_not_fix=False,
+        page_human=True,
+    )
+    assert rec.paths()[-1] == "PATCH /repos/o/r/pulls/42"
+    patched = json.loads(rec.requests[-1].read())
+    assert patched["body"].startswith("Problem and change.")
+    assert "# Incident report" in patched["body"] and "## Hypothesis" in patched["body"]
+    assert ts.report is not None and ts.report.pull_request_url == "https://github.com/o/r/pull/42"
