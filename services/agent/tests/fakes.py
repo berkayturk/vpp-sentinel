@@ -282,6 +282,35 @@ class FakeWorkspace:
 
         return TestResult(self.tests_pass, self.test_output)
 
-    async def commit_and_push(self, branch: str, message: str) -> str:
-        self.pushed.append((branch, message))
+    async def commit_and_push(self, branch: str, message: str, paths=()) -> str:
+        self.pushed.append((branch, message, tuple(paths)))
         return "0" * 40
+
+
+# --- model runner ----------------------------------------------------------------
+
+
+class ScriptedRunner:
+    """A ModelRunner that calls the tool set's methods in a fixed order, then answers."""
+
+    def __init__(self, toolset, steps: list[tuple[str, dict]], final_text: str = "") -> None:
+        self._toolset = toolset
+        self._steps = steps
+        self._final_text = final_text
+        self.received_system = ""
+        self.received_user = ""
+        self.received_tool_names: tuple[str, ...] = ()
+
+    async def run(self, system: str, user: str, tools, max_iterations: int):
+        from agent.loop import RunResult, Usage
+
+        self.received_system = system
+        self.received_user = user
+        self.received_tool_names = tuple(t.name for t in tools)
+        for name, kwargs in self._steps[:max_iterations]:
+            await getattr(self._toolset, name)(**kwargs)
+        return RunResult(
+            final_text=self._final_text,
+            usage=Usage(input_tokens=1000, output_tokens=200, cache_read_tokens=500),
+            iterations=len(self._steps),
+        )

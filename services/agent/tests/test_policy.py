@@ -92,3 +92,19 @@ def test_allowlist_file_in_repo_root_parses():
     assert a.restart_allowed("vpp", "ingestion").allowed
     assert a.pull_requests_enabled
     assert "services/agent/" in a.forbidden_paths
+
+
+@pytest.mark.parametrize(
+    "build_file",
+    [
+        "services/ingestion/pyproject.toml",
+        "services/ingestion/Dockerfile",
+        "services/ingestion/migrations/0003_x.sql",
+        "services/ingestion/tests/conftest.py",
+    ],
+)
+def test_repo_allowlist_forbids_build_and_config_files_in_scope(build_file: str):
+    a = load_allowlist(Path(__file__).resolve().parents[3] / "allowlist.yaml")
+    guard = PathGuard(Path("/repo"), allowed=a.allowed_paths, forbidden=a.forbidden_paths)
+    assert not guard.check_diff([build_file]).allowed
+    assert guard.check_diff(["services/ingestion/src/ingestion/schema.py"]).allowed

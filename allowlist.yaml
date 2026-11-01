@@ -8,4 +8,14 @@ actions:
 pull_requests:
   enabled: true
   allowed_paths: [services/ingestion/]
-  forbidden_paths: [allowlist.yaml, services/agent/, .github/, CODEOWNERS]
+  # Outside the agent's scope, plus the build and configuration files inside it: a code fix
+  # changes source and tests, never dependencies, images, migrations or test plumbing.
+  forbidden_paths:
+    - allowlist.yaml
+    - services/agent/
+    - .github/
+    - CODEOWNERS
+    - services/ingestion/pyproject.toml
+    - services/ingestion/Dockerfile
+    - services/ingestion/migrations/
+    - services/ingestion/tests/conftest.py

@@ -225,7 +225,11 @@ async def test_pull_request_happy_path_then_update(setup):
     )
     assert out.startswith("ok") and "https://github.com/o/r/pull/42" in out
     assert setup["workspace"].pushed == [
-        ("agent/vppsitedevicesdark-como-charger", "fix(ingestion): Accept the new payload")
+        (
+            "agent/vppsitedevicesdark-como-charger",
+            "fix(ingestion): Accept the new payload",
+            ("services/ingestion/tests/test_fix.py",),
+        )
     ]
     paths = setup["recs"]["github"].paths()
     assert paths == ["GET /repos/o/r/pulls", "POST /repos/o/r/pulls"]

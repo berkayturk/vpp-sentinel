@@ -266,7 +266,9 @@ class ToolSet:
         clean_title = _strip_attribution(title).strip()
         clean_body = _strip_attribution(body).strip()
         try:
-            await self.deps.workspace.commit_and_push(branch, f"fix(ingestion): {clean_title}")
+            await self.deps.workspace.commit_and_push(
+                branch, f"fix(ingestion): {clean_title}", changed
+            )
             existing = await github.find_open_pr(self.deps.github, self.deps.repo, branch)
             if existing is None:
                 pr = await github.create_pr(

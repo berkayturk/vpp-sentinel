@@ -66,7 +66,11 @@ async def test_write_commit_push_creates_the_branch_upstream(bare: Path, tmp_pat
     await ws.prepare()
     await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "def test_x():\n    pass\n")
     assert await ws.changed_paths() == ("services/ingestion/tests/test_fix.py",)
-    sha = await ws.commit_and_push("agent/test-branch", "fix(ingestion): accept the new payload")
+    sha = await ws.commit_and_push(
+        "agent/test-branch",
+        "fix(ingestion): accept the new payload",
+        paths=("services/ingestion/tests/test_fix.py",),
+    )
     assert len(sha) == 40
     assert "agent/test-branch" in _git("branch", "--list", "agent/test-branch", cwd=bare)
     log = _git("log", "-1", "--format=%an <%ae> %s", "agent/test-branch", cwd=bare)
@@ -98,7 +102,7 @@ async def test_push_errors_never_contain_the_token(tmp_path: Path):
     _git("init", "-q", "-b", "main", str(tmp_path / "ws"), cwd=tmp_path)
     (tmp_path / "ws/f.txt").write_text("x")
     with pytest.raises(WorkspaceError) as info:
-        await ws.commit_and_push("agent/x", "chore: x")
+        await ws.commit_and_push("agent/x", "chore: x", paths=("f.txt",))
     assert TOKEN not in str(info.value)
     assert "<token>" in str(info.value) or "localhost" in str(info.value)
 
@@ -109,3 +113,48 @@ async def test_prepare_twice_resets_to_a_clean_clone(bare: Path, tmp_path: Path)
     await ws.write(ws.root / "services/ingestion/src/ingestion/schema.py", "x = 2\n")
     await ws.prepare()
     assert await ws.read(ws.root / "services/ingestion/src/ingestion/schema.py") == "x = 1\n"
+
+
+async def test_changed_paths_handles_renames_and_spaces(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    _git(
+        "mv",
+        "services/ingestion/src/ingestion/schema.py",
+        "services/ingestion/src/ingestion/parser.py",
+        cwd=ws.root,
+    )
+    await ws.write(ws.root / "services/ingestion/tests/test with space.py", "x = 1\n")
+    changed = await ws.changed_paths()
+    assert "services/ingestion/src/ingestion/parser.py" in changed
+    assert "services/ingestion/src/ingestion/schema.py" in changed
+    assert "services/ingestion/tests/test with space.py" in changed
+
+
+async def test_commit_stages_only_the_given_paths(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 1\n")
+    await ws.write(ws.root / "services/ingestion/tests/test_other.py", "y = 1\n")
+    await ws.commit_and_push(
+        "agent/only-one", "fix: one", paths=("services/ingestion/tests/test_fix.py",)
+    )
+    files = _git("show", "--name-only", "--format=", "agent/only-one", cwd=bare)
+    assert "test_fix.py" in files and "test_other.py" not in files
+
+
+async def test_run_tests_does_not_inherit_secrets(bare: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak-123456")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_shouldnotleak123456")
+    ws = _workspace(
+        bare,
+        tmp_path / "ws",
+        test_command=(
+            "python3",
+            "-c",
+            "import os; print(sorted(k for k in os.environ if 'KEY' in k or 'TOKEN' in k))",
+        ),
+    )
+    await ws.prepare()
+    result = await ws.run_tests()
+    assert result.passed and result.output.strip().endswith("[]")
