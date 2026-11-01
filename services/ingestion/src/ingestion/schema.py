@@ -6,7 +6,7 @@ whose ``reason`` is one of a small, bounded set so it can be a metric label.
 
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -16,6 +16,19 @@ Status = Literal["charging", "idle", "discharging", "producing", "fault"]
 Reason = Literal[
     "invalid_json", "invalid_timestamp", "missing_field", "invalid_value", "unknown_device"
 ]
+
+# Integer timestamps (sent by charger firmware 2.4.0) are milliseconds since the Unix epoch.
+# Only values between 2000-01-01 and 2100-01-01 are plausible; this also rejects epoch
+# seconds, which would otherwise be misread as a date in January 1970.
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_MIN_EPOCH_MS = 946_684_800_000  # 2000-01-01T00:00:00Z
+_MAX_EPOCH_MS = 4_102_444_800_000  # 2100-01-01T00:00:00Z
+
+
+def _from_epoch_ms(value: int) -> datetime:
+    if not _MIN_EPOCH_MS <= value < _MAX_EPOCH_MS:
+        raise ValueError("integer timestamp must be epoch milliseconds between 2000 and 2100")
+    return _EPOCH + timedelta(milliseconds=value)
 
 
 class Telemetry(BaseModel):
@@ -34,9 +47,11 @@ class Telemetry(BaseModel):
 
     @field_validator("ts", mode="before")
     @classmethod
-    def _ts_must_be_iso_string(cls, value: Any) -> Any:
+    def _ts_must_be_iso_string_or_epoch_ms(cls, value: Any) -> Any:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return _from_epoch_ms(value)
         if not isinstance(value, str | datetime):
-            raise ValueError("timestamp must be an ISO 8601 string")
+            raise ValueError("timestamp must be an ISO 8601 string or integer epoch milliseconds")
         return value
 
     @field_validator("ts")

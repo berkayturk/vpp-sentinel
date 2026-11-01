@@ -6,6 +6,14 @@ GOOD = (
     b'"power_kw":7.4,"energy_kwh":12.5,"soc_pct":null,"voltage_v":231.2}'
 )
 
+# Shape sent by charger firmware 2.4.0 (incident VppSiteDevicesDark, como, 2026-11-01):
+# "ts" is an integer count of milliseconds since the Unix epoch.
+FW_240_EPOCH_MS = (
+    b'{"device_id":"como-charger-002","site":"como","device_type":"charger",'
+    b'"ts":1793540889104,"firmware":"2.4.0","status":"charging",'
+    b'"power_kw":22.0,"energy_kwh":1.406,"soc_pct":null,"voltage_v":228.3}'
+)
+
 
 def test_parses_normal_payload():
     t = parse_telemetry(GOOD)
@@ -19,6 +27,40 @@ def test_parses_offset_timestamp_to_utc():
     t = parse_telemetry(GOOD.replace(b"14:05:00Z", b"16:05:00+02:00"))
     assert isinstance(t, Telemetry)
     assert t.ts.isoformat() == "2026-10-31T14:05:00+00:00"
+
+
+def test_parses_firmware_240_epoch_millisecond_timestamp():
+    t = parse_telemetry(FW_240_EPOCH_MS)
+    assert isinstance(t, Telemetry), t
+    assert t.ts.isoformat() == "2026-11-01T13:48:09.104000+00:00"
+    assert t.firmware == "2.4.0"
+    assert t.power_kw == 22.0
+
+
+def test_epoch_seconds_integer_is_rejected():
+    # Ten-digit epoch seconds would silently land in 1970 if read as milliseconds.
+    garbled = FW_240_EPOCH_MS.replace(b'"ts":1793540889104', b'"ts":1793540889')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.4.0")
+
+
+def test_negative_epoch_timestamp_is_rejected():
+    garbled = FW_240_EPOCH_MS.replace(b'"ts":1793540889104', b'"ts":-1')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.4.0")
+
+
+def test_absurdly_large_epoch_timestamp_is_rejected():
+    garbled = FW_240_EPOCH_MS.replace(b'"ts":1793540889104', b'"ts":99999999999999999999')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.4.0")
+
+
+def test_float_epoch_timestamp_is_rejected():
+    garbled = FW_240_EPOCH_MS.replace(b'"ts":1793540889104', b'"ts":1793540889104.5')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.4.0")
+
+
+def test_boolean_timestamp_is_rejected():
+    garbled = FW_240_EPOCH_MS.replace(b'"ts":1793540889104', b'"ts":true')
+    assert parse_telemetry(garbled) == ParseError("invalid_timestamp", "charger", "2.4.0")
 
 
 def test_invalid_json_is_reported_not_raised():
