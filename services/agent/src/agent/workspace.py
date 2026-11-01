@@ -127,20 +127,40 @@ class GitWorkspace:
         return TestResult(True, _tail(output))
 
     async def commit_and_push(self, branch: str, message: str, paths: Sequence[str] = ()) -> str:
-        """Stage exactly ``paths`` (already validated by the caller), commit and push."""
+        """Stage exactly ``paths`` (already validated by the caller), commit and push.
+
+        Model-written tests have run inside ``root``, so its ``.git`` directory is
+        not trusted any more: the commit is made in a fresh clone that no test ever
+        touched, into which only the validated paths are copied. Commits a test may
+        have made in the workspace therefore never reach the push either.
+        """
         if not paths:
             raise WorkspaceError("nothing to commit: no validated paths were given")
+        clean = self.root.parent / f"{self.root.name}.clean"
+        if clean.exists():
+            shutil.rmtree(clean)
+        await _git(
+            "clone",
+            "-q",
+            "--branch",
+            self._base_branch,
+            self.repo_url,
+            str(clean),
+            cwd=self.root.parent,
+        )
+        for relative in paths:
+            _copy_validated(self.root / relative, clean / relative)
         name, email = _split_author(self._author)
         identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
-        await _git("checkout", "-q", "-B", branch, cwd=self.root)
-        await _git("add", "--", *paths, cwd=self.root)
-        await _git(*identity, "commit", "-q", "-m", message, cwd=self.root)
-        sha = (await _git("rev-parse", "HEAD", cwd=self.root)).strip()
+        await _git("checkout", "-q", "-B", branch, cwd=clean)
+        await _git("add", "--", *paths, cwd=clean)
+        await _git(*identity, "commit", "-q", "-m", message, cwd=clean)
+        sha = (await _git("rev-parse", "HEAD", cwd=clean)).strip()
         token = self._token_provider() or ""
         # Without a GitHub repo name (local repositories in tests) the clone source is the remote.
         url = self._push_url.format(token=token, repo=self._repo) if self._repo else self.repo_url
-        await _run(
-            ["git", "push", "-q", "--force-with-lease", url, f"HEAD:{branch}"], cwd=self.root
+        await _git(
+            *PUSH_HARDENING, "push", "-q", "--force-with-lease", url, f"HEAD:{branch}", cwd=clean
         )
         return sha
 
@@ -148,6 +168,23 @@ class GitWorkspace:
 # Model-written tests run inside the workspace and could plant hooks or edit .git/config;
 # every git command therefore ignores hooks and any repository, global or system config.
 GIT_HARDENING = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+# The push goes to the explicit URL only: no credential helpers, proxies, ssh or URL rewrites.
+PUSH_HARDENING = (
+    "-c",
+    "credential.helper=",
+    "-c",
+    "http.proxy=",
+    "-c",
+    "https.proxy=",
+    "-c",
+    "core.sshCommand=",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "protocol.file.allow=always",
+)
 
 
 async def _git(*args: str, cwd: Path, raw: bool = False) -> str:
@@ -214,6 +251,15 @@ def _test_env(root: Path) -> dict[str, str]:
     home.mkdir(parents=True, exist_ok=True)
     keep = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TZ")}
     return {**keep, "HOME": str(home), "UV_CACHE_DIR": str(home / "uv-cache")}
+
+
+def _copy_validated(source: Path, target: Path) -> None:
+    """Mirror one validated path into the clean clone; a missing source is a deletion."""
+    if source.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    elif target.exists():
+        target.unlink()
 
 
 def _tail(text: str) -> str:

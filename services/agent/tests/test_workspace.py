@@ -89,20 +89,21 @@ async def test_run_tests_reports_pass_and_fail(bare: Path, tmp_path: Path):
     assert not result.passed
 
 
-async def test_push_errors_never_contain_the_token(tmp_path: Path):
+async def test_push_errors_never_contain_the_token(bare: Path, tmp_path: Path):
     ws = GitWorkspace(
-        repo_url="https://github.com/example/does-not-exist.git",
+        repo_url=str(bare),
         root=tmp_path / "ws",
         token_provider=lambda: TOKEN,
         author="Agent Test <agent@example.com>",
         push_url="https://x-access-token:{token}@localhost:1/{repo}.git",
         repo="example/does-not-exist",
     )
-    (tmp_path / "ws").mkdir()
-    _git("init", "-q", "-b", "main", str(tmp_path / "ws"), cwd=tmp_path)
-    (tmp_path / "ws/f.txt").write_text("x")
+    await ws.prepare()
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 1\n")
     with pytest.raises(WorkspaceError) as info:
-        await ws.commit_and_push("agent/x", "chore: x", paths=("f.txt",))
+        await ws.commit_and_push(
+            "agent/x", "chore: x", paths=("services/ingestion/tests/test_fix.py",)
+        )
     assert TOKEN not in str(info.value)
     assert "<token>" in str(info.value) or "localhost" in str(info.value)
 
@@ -176,3 +177,19 @@ async def test_git_hooks_planted_in_the_workspace_never_run(bare: Path, tmp_path
         "agent/no-hooks", "fix: x", paths=("services/ingestion/tests/test_fix.py",)
     )
     assert not (tmp_path / "marker").exists()
+
+
+async def test_repo_config_planted_after_tests_cannot_redirect_the_push(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    # A model-written test could rewrite the push destination through the workspace's own config.
+    config = ws.root / ".git" / "config"
+    config.write_text(
+        config.read_text() + f'[url "{tmp_path / "nowhere.git"}"]\n\tinsteadOf = {bare}\n'
+    )
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 1\n")
+    await ws.commit_and_push(
+        "agent/untainted", "fix: x", paths=("services/ingestion/tests/test_fix.py",)
+    )
+    assert "agent/untainted" in _git("branch", "--list", "agent/untainted", cwd=bare)
+    assert not (tmp_path / "nowhere.git").exists()
