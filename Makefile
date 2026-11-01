@@ -10,7 +10,7 @@ PROMTOOL := docker run --rm -v $(PWD)/deploy/observability/rules:/rules --entryp
 
 .PHONY: help test lint fmt images helm-deps demo down status incident-load-surge incident-firmware-drift \
         incident-clear grafana prometheus alertmanager alerts alerts-test dashboards-check \
-        agent-credentials agent-logs
+        agent-credentials agent-logs capture
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-24s %s\n", $$1, $$2}'
@@ -80,6 +80,9 @@ agent-credentials: ## Create the agent's secret from ANTHROPIC_API_KEY and GITHU
 	else \
 	  echo "ANTHROPIC_API_KEY is not set: the agent will idle (platform and dashboards still work)"; \
 	fi
+
+capture: ## Run both scenarios on the current cluster and write docs/kpis.md and docs/sample-report.md
+	NAMESPACE=$(NAMESPACE) OBS_NAMESPACE=$(OBS_NAMESPACE) scripts/capture.sh
 
 agent-logs: ## Follow the incident agent's log
 	kubectl -n $(NAMESPACE) logs deploy/agent -f --tail=100

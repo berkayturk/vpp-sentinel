@@ -30,6 +30,7 @@ written to the repository.
 | `make grafana` | Opens Grafana on `localhost:3000` (admin / `vpp-demo-password`) |
 | `make alerts` | Lists active alerts |
 | `make agent-logs` | Follows the incident agent's log: incidents, tool calls, reports |
+| `make capture` | Runs both scenarios in order and writes `docs/kpis.md` and `docs/sample-report.md` (needs the agent credentials; about 4–6 USD on Opus) |
 | `make incident-load-surge` | One site publishes telemetry 50× faster for 180 s |
 | `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |
