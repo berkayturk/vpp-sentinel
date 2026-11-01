@@ -60,6 +60,7 @@ async def test_open_then_find_open(store: PostgresIncidentStore):
     found = await store.find_open("VppSiteDevicesDark|como|charger")
     assert found is not None and found.id == opened.id
     assert await store.find_open("VppIngestionLagHigh|-|-") is None
+    assert [i.id for i in await store.list_open()] == [opened.id]
 
 
 async def test_record_action_appends_immutably(store: PostgresIncidentStore):

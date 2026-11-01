@@ -3,6 +3,7 @@
 images:
   fleetSimulator: vpp-fleet-simulator:dev
   ingestion: vpp-ingestion:dev
+  agent: vpp-agent:dev
   mosquitto: eclipse-mosquitto:2.0
   postgres: postgres:16
   pullPolicy: IfNotPresent
@@ -29,3 +30,28 @@ postgres:
   user: vpp
   # Demo-only credential. It never leaves the kind cluster and is not a secret worth protecting.
   password: vpp-demo-password
+
+agent:
+  enabled: true
+  # The model is an environment variable, not code: rehearsals may use a smaller one.
+  model: claude-opus-5-5
+  effort: high
+  logLevel: INFO
+  pollIntervalSeconds: 15
+  repo: berkayturk/vpp-sentinel
+  gitAuthor: "Berkay Turk <berkaytrk6@gmail.com>"
+  endpoints:
+    alertmanager: http://obs-alertmanager.monitoring:9093
+    prometheus: http://obs-prometheus.monitoring:9090
+    loki: http://loki.monitoring:3100
+    grafana: http://grafana.monitoring:80
+  grafana:
+    user: admin
+    # The same demo-only password as deploy/observability/values.yaml.
+    password: vpp-demo-password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

@@ -51,6 +51,7 @@ class Incident:
 class IncidentStore(Protocol):
     async def open(self, alert: Alert) -> Incident: ...
     async def find_open(self, fingerprint: str) -> Incident | None: ...
+    async def list_open(self) -> tuple[Incident, ...]: ...
     async def record_action(self, incident_id: int, action: Mapping[str, Any]) -> Incident: ...
     async def save_report(self, incident_id: int, report_md: str) -> Incident: ...
     async def resolve(self, incident_id: int, outcome: str) -> Incident: ...
@@ -91,6 +92,12 @@ class PostgresIncidentStore:
             fingerprint,
         )
         return _incident(row) if row else None
+
+    async def list_open(self) -> tuple[Incident, ...]:
+        rows = await self._pool.fetch(
+            f"SELECT {COLUMNS} FROM incidents WHERE resolved_at IS NULL ORDER BY started_at"
+        )
+        return tuple(_incident(row) for row in rows)
 
     async def record_action(self, incident_id: int, action: Mapping[str, Any]) -> Incident:
         row = await self._pool.fetchrow(

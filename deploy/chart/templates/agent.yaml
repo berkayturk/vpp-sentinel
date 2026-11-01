@@ -1,0 +1,149 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent
+  labels:
+    app.kubernetes.io/name: agent
+    {{- include "vpp.labels" . | nindent 4 }}
+---
+# The agent's Kubernetes authority mirrors allowlist.yaml: patch (rollout restart) on the one
+# deployment it may restart, and nothing else. A second line of defence behind the tool's check.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-restart
+  labels:
+    {{- include "vpp.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["ingestion"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-restart
+  labels:
+    {{- include "vpp.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: agent
+roleRef:
+  kind: Role
+  name: agent-restart
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  labels:
+    app.kubernetes.io/name: agent
+    {{- include "vpp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent
+        {{- include "vpp.labels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: agent
+      containers:
+        - name: agent
+          image: {{ .Values.images.agent }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: HTTP_PORT
+              value: "8001"
+            - name: LOG_LEVEL
+              value: {{ .Values.agent.logLevel | quote }}
+            - name: AGENT_MODEL
+              value: {{ .Values.agent.model | quote }}
+            - name: AGENT_EFFORT
+              value: {{ .Values.agent.effort | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.agent.pollIntervalSeconds | quote }}
+            - name: GITHUB_REPO
+              value: {{ .Values.agent.repo | quote }}
+            - name: GIT_AUTHOR
+              value: {{ .Values.agent.gitAuthor | quote }}
+            - name: KUBE_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: ALERTMANAGER_URL
+              value: {{ .Values.agent.endpoints.alertmanager | quote }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.agent.endpoints.prometheus | quote }}
+            - name: LOKI_URL
+              value: {{ .Values.agent.endpoints.loki | quote }}
+            - name: GRAFANA_URL
+              value: {{ .Values.agent.endpoints.grafana | quote }}
+            - name: GRAFANA_USER
+              value: {{ .Values.agent.grafana.user | quote }}
+            - name: GRAFANA_PASSWORD
+              value: {{ .Values.agent.grafana.password | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: DATABASE_URL
+            # Created by `make demo` from the environment; optional so the platform runs without it.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-credentials
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-credentials
+                  key: GITHUB_TOKEN
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8001
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+      volumes:
+        - name: workspace
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  labels:
+    app.kubernetes.io/name: agent
+    {{- include "vpp.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: agent
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
+{{- end }}

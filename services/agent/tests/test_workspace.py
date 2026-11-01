@@ -158,3 +158,21 @@ async def test_run_tests_does_not_inherit_secrets(bare: Path, tmp_path: Path, mo
     await ws.prepare()
     result = await ws.run_tests()
     assert result.passed and result.output.strip().endswith("[]")
+
+
+async def test_git_hooks_planted_in_the_workspace_never_run(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    # A model-written test could plant this; the commit must not execute it.
+    hooks = ws.root / ".git" / "hooks"
+    hook = hooks / "pre-commit"
+    hook.write_text(f"#!/bin/sh\necho pwned > {tmp_path / 'marker'}\n")
+    hook.chmod(0o755)
+    (ws.root / ".git" / "config").write_text(
+        (ws.root / ".git" / "config").read_text() + "[core]\n\thooksPath = .git/hooks\n"
+    )
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 1\n")
+    await ws.commit_and_push(
+        "agent/no-hooks", "fix: x", paths=("services/ingestion/tests/test_fix.py",)
+    )
+    assert not (tmp_path / "marker").exists()

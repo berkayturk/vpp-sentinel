@@ -9,6 +9,16 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
 - Docker (Desktop or Engine)
 - [kind](https://kind.sigs.k8s.io/), `kubectl`, [Helm 3](https://helm.sh/)
 - [uv](https://docs.astral.sh/uv/) (Python 3.12 is installed by uv on demand)
+- For the incident agent (optional — without it the platform and dashboards still run):
+  - `ANTHROPIC_API_KEY` in your environment (an Anthropic API key; one incident run
+    costs roughly 1–3 USD on Claude Opus)
+  - `GITHUB_TOKEN`: a fine-grained personal access token for the repository the
+    agent should open pull requests on, with *Contents: write* and
+    *Pull requests: write*; set `agent.repo` in `deploy/chart/values.yaml` to your
+    fork. The agent never merges.
+
+`make demo` stores both values in a Kubernetes Secret in the cluster; they are never
+written to the repository.
 
 ## Run
 
@@ -18,6 +28,7 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
 | `make status` | Lists pods, active faults and active alerts |
 | `make grafana` | Opens Grafana on `localhost:3000` (admin / `vpp-demo-password`) |
 | `make alerts` | Lists active alerts |
+| `make agent-logs` | Follows the incident agent's log: incidents, tool calls, reports |
 | `make incident-load-surge` | One site publishes telemetry 50× faster for 180 s |
 | `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |

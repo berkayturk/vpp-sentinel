@@ -177,6 +177,9 @@ class FakeIncidentStore:
 
         return self._replace(incident_id, lambda i: i.resolved(datetime.now(UTC), outcome))
 
+    async def list_open(self):
+        return tuple(r for r in self.rows if r.resolved_at is None)
+
     async def recent_like(self, alert_name: str, limit: int = 3):
         done = [r for r in self.rows if r.alert_name == alert_name and r.resolved_at is not None]
         return tuple(sorted(done, key=lambda r: r.started_at, reverse=True)[:limit])
@@ -314,3 +317,24 @@ class ScriptedRunner:
             usage=Usage(input_tokens=1000, output_tokens=200, cache_read_tokens=500),
             iterations=len(self._steps),
         )
+
+
+class ScriptedByName:
+    """A ModelRunner that finds tools by name in the list it is given and calls them."""
+
+    def __init__(self, steps: list[tuple[str, dict]], final_text: str = "done") -> None:
+        self._steps = steps
+        self._final_text = final_text
+        self.calls = 0
+        self.explode = False
+
+    async def run(self, system: str, user: str, tools, max_iterations: int):
+        from agent.loop import RunResult, Usage
+
+        self.calls += 1
+        if self.explode:
+            raise RuntimeError("model exploded")
+        by_name = {t.name: t for t in tools}
+        for name, kwargs in self._steps[:max_iterations]:
+            await by_name[name].func(**kwargs)
+        return RunResult(self._final_text, Usage(10, 5, 0), len(self._steps))

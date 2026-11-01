@@ -81,8 +81,13 @@ class GitWorkspace:
         if self.root.exists():
             shutil.rmtree(self.root)
         self.root.parent.mkdir(parents=True, exist_ok=True)
-        await _run(
-            ["git", "clone", "-q", "--branch", self._base_branch, self.repo_url, str(self.root)],
+        await _git(
+            "clone",
+            "-q",
+            "--branch",
+            self._base_branch,
+            self.repo_url,
+            str(self.root),
             cwd=self.root.parent,
         )
 
@@ -103,10 +108,8 @@ class GitWorkspace:
 
     async def changed_paths(self) -> tuple[str, ...]:
         """Every modified, added, deleted or renamed path (both sides of a rename), NUL-safe."""
-        out = await _run(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            cwd=self.root,
-            raw=True,
+        out = await _git(
+            "status", "--porcelain=v1", "-z", "--untracked-files=all", cwd=self.root, raw=True
         )
         return tuple(sorted(_parse_status(out)))
 
@@ -129,10 +132,10 @@ class GitWorkspace:
             raise WorkspaceError("nothing to commit: no validated paths were given")
         name, email = _split_author(self._author)
         identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
-        await _run(["git", "checkout", "-q", "-B", branch], cwd=self.root)
-        await _run(["git", "add", "--", *paths], cwd=self.root)
-        await _run(["git", *identity, "commit", "-q", "-m", message], cwd=self.root)
-        sha = (await _run(["git", "rev-parse", "HEAD"], cwd=self.root)).strip()
+        await _git("checkout", "-q", "-B", branch, cwd=self.root)
+        await _git("add", "--", *paths, cwd=self.root)
+        await _git(*identity, "commit", "-q", "-m", message, cwd=self.root)
+        sha = (await _git("rev-parse", "HEAD", cwd=self.root)).strip()
         token = self._token_provider() or ""
         # Without a GitHub repo name (local repositories in tests) the clone source is the remote.
         url = self._push_url.format(token=token, repo=self._repo) if self._repo else self.repo_url
@@ -140,6 +143,26 @@ class GitWorkspace:
             ["git", "push", "-q", "--force-with-lease", url, f"HEAD:{branch}"], cwd=self.root
         )
         return sha
+
+
+# Model-written tests run inside the workspace and could plant hooks or edit .git/config;
+# every git command therefore ignores hooks and any repository, global or system config.
+GIT_HARDENING = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+
+
+async def _git(*args: str, cwd: Path, raw: bool = False) -> str:
+    return await _run(["git", *GIT_HARDENING, *args], cwd=cwd, env=_git_env(), raw=raw)
+
+
+def _git_env() -> dict[str, str]:
+    keep = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TZ")}
+    return {
+        **keep,
+        "HOME": "/nonexistent",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
 
 
 async def _run(
