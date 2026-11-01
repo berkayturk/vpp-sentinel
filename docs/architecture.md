@@ -182,6 +182,8 @@ fleet-level check that a later layer may add.
 
 ### Scenario behaviour (measured on a laptop kind cluster)
 
+The scripted end-to-end measurement, including the agent, is in [kpis.md](kpis.md).
+
 - `make incident-load-surge` makes the 60 devices at lugano-south publish
   50× faster (every 100 ms) for 180 s. The ingestion pod's 100m CPU limit
   caps the single consumer near 400 messages per second, so a backlog

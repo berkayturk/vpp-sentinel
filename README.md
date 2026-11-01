@@ -1,10 +1,99 @@
 # vpp-sentinel
 
-Platform health and incident agent for distributed energy fleets.
+> *From reacting to problems to preventing them.*
 
-_Work in progress — see `docs/architecture.md` for what is built so far._
+I built this over a weekend to show how I think about keeping a distributed
+energy platform healthy: a simulated fleet of chargers, batteries and solar
+inverters streams telemetry over MQTT into a Python ingestion service on
+Kubernetes, Prometheus and Loki watch it, and an incident agent investigates
+every alert, acts only within an allowlist, and opens a pull request when the
+cause is in the code. The architecture and every design decision are mine;
+the implementation was done with AI assistance, which is itself part of what
+the platform-health role asks for.
 
-## Prerequisites
+## Sixty seconds
+
+1. **A site goes dark.** Forty percent of one site's chargers switch to a new
+   firmware and the platform stops storing their telemetry. The alert fires
+   <<KPI:drift-detection>> after the fault is injected.
+2. **The agent reads before it acts.** It receives a sanitised, read-only
+   context — timing, blast radius ("12 of 30 chargers at como"), severity,
+   whether this was seen before, the warning logs and the runbook — then
+   queries Prometheus and Loki, reads the ingestion code, writes a failing
+   regression test, fixes the parser, and runs the suite in a separate
+   container that holds no secrets.
+3. **It opens a pull request it cannot merge.** <<KPI:drift-pr>> after the
+   alert, the fix and the incident report are on GitHub for a human to
+   review: [pull request #1](https://github.com/berkayturk/vpp-sentinel/pull/1).
+   The other scenario — a telemetry surge that the single consumer cannot
+   absorb — ends with the one action the allowlist permits, a rollout
+   restart, <<KPI:surge-action>> after the alert, and a report that says
+   plainly it is a mitigation, not a fix.
+
+![Fleet health dashboard during the firmware-drift incident](docs/images/fleet-health.png)
+
+## Measured
+
+Numbers from one scripted run on a fresh cluster (`make capture`); the full
+table and the protocol are in [docs/kpis.md](docs/kpis.md).
+
+| KPI | Load surge (restart) | Firmware drift (pull request) |
+|---|---|---|
+| Detection: fault injected → alert firing | <<KPI:surge-detection>> | <<KPI:drift-detection>> |
+| Action: alert firing → allowlisted restart | <<KPI:surge-action>> | — |
+| Pull request: alert firing → PR opened | — | <<KPI:drift-pr>> |
+| Report filed after the alert | <<KPI:surge-report>> | <<KPI:drift-report>> |
+| Resolution: alert firing → alert resolved | <<KPI:surge-resolution>> | — |
+| Model cost for both incidents | <<KPI:cost>> | |
+
+The agent's own report for the firmware-drift incident is in
+[docs/sample-report.md](docs/sample-report.md), copied verbatim from the
+`incidents` table.
+
+## What the agent may and may not do
+
+Three tiers, enforced in code rather than in the prompt:
+
+1. **Report** — always. Every incident ends with a structured report stored
+   on the incident and emitted to Loki.
+2. **Allowlisted actions** — [`allowlist.yaml`](allowlist.yaml) names the one
+   deployment the agent may restart and a cooldown; the tool refuses anything
+   else, and Kubernetes RBAC plus an admission policy refuse it a second time.
+3. **Code fix** — the agent may read and edit `services/ingestion/` only, must
+   pass the test suite before it can push, and can open or update a pull
+   request. There is no merge tool.
+
+Ten tools exist and a test asserts the registry is exactly those ten: no
+shell, no kubectl, no merge. Device identifiers, addresses and tokens are
+masked before the model sees anything. The tests the model writes run in a
+sidecar container with another user, no secrets and no service-account token.
+Each boundary has a test; [docs/architecture.md](docs/architecture.md)
+lists what every tool refuses and what the remaining limitations are.
+
+## Architecture
+
+```
+ fleet-simulator ──MQTT──▶ mosquitto ──▶ ingestion ──asyncpg──▶ postgresql
+ 300 devices, 5 sites        │              │ parse→store→metrics→log   telemetry, incidents
+ fault switches              │              ▼
+                             │         Prometheus ◀── Alertmanager ◀── 2 alerts, 2 runbooks
+                             │         Loki ◀── Alloy          │
+                             ▼                                 ▼
+                         Grafana (2 dashboards)           incident agent ── GitHub PR
+```
+
+- **Platform** — a Python fleet simulator with domain-correct physics and two
+  fault switches; an asyncio ingestion service with bounded metric labels and
+  JSON logs; PostgreSQL. [docs/architecture.md](docs/architecture.md)
+- **Observability** — kube-prometheus-stack, Loki and Alloy from one Helm
+  chart; exactly two alerts, unit-tested with promtool, each linked to a
+  runbook in [docs/runbooks](docs/runbooks); two provisioned dashboards.
+- **Agent** — the official Anthropic SDK with custom tools only; one pod,
+  one allowlist, one pull-request branch per incident fingerprint.
+
+## Run it
+
+### Prerequisites
 
 - Docker (Desktop or Engine)
 - [kind](https://kind.sigs.k8s.io/), `kubectl`, [Helm 3](https://helm.sh/)
@@ -21,8 +110,6 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
 `make demo` stores both values in a Kubernetes Secret in the cluster; they are never
 written to the repository.
 
-## Run
-
 | Command | What it does |
 |---|---|
 | `make demo` | Builds the images, creates the `vpp-sentinel` kind cluster if needed and deploys the observability stack and the platform |
@@ -30,32 +117,45 @@ written to the repository.
 | `make grafana` | Opens Grafana on `localhost:3000` (admin / `vpp-demo-password`) |
 | `make alerts` | Lists active alerts |
 | `make agent-logs` | Follows the incident agent's log: incidents, tool calls, reports |
-| `make capture` | Runs both scenarios in order and writes `docs/kpis.md` and `docs/sample-report.md` (needs the agent credentials; about 4–6 USD on Opus) |
 | `make incident-load-surge` | One site publishes telemetry 50× faster for 180 s |
 | `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |
+| `make capture` | Runs both scenarios in order and writes `docs/kpis.md` and `docs/sample-report.md` (needs the agent credentials; about 4–6 USD on Opus) |
 | `make down` | Deletes the kind cluster |
 
-Developer loop: `make test`, `make lint` and `make alerts-test` (alert rules
-are unit-tested with promtool).
+Developer loop: `make test`, `make lint`, `make alerts-test` (alert rules are
+unit-tested with promtool) and `make dashboards-check`.
 
-## The incident agent
+Two things are deliberate and disclosed: the `incidents` table ships with one
+seeded historical incident so a first run can show the memory lookup, and the
+platform ships with one deliberate code-level defect that the incident
+scenarios expose. This README does not say what the defect is; the agent's
+pull request does.
 
-When an alert fires, the agent assembles a sanitised, read-only context
-(timing, blast radius, severity, incident memory, logs, runbook), investigates
-with ten purpose-built tools, and always files a report. It may restart the
-one deployment named in `allowlist.yaml`, and for a code-level cause it opens
-a pull request on `agent/<fingerprint>` that it can never merge. Every
-boundary is enforced in the tools and covered by a test; there is no shell or
-kubectl tool, and the tests the model writes run in a separate container
-with no secrets. `docs/architecture.md` has the details.
+## What I would do next
 
-The `incidents` table ships with one seeded historical incident so a first run
-can show the memory lookup; it is marked as seeded in the migration.
+1. A `NetworkPolicy` for the test-runner container, on a cluster whose network
+   plugin enforces it; today the runner can reach the internet because `uv`
+   needs PyPI.
+2. An Alertmanager webhook instead of polling, so the agent wakes within
+   seconds and the pager path is the real one.
+3. A replay mode that re-plays a recorded agent run without an API key, so a
+   reader can watch the whole story for free.
+4. Prompt caching on the agent's requests — a run today sends about 350 k
+   input tokens, most of them the same system prompt and context.
+5. "Promotion": when the agent has proposed the same action several times and
+   a human approved it each time with a good outcome, propose adding it to the
+   allowlist through a pull request.
 
-## A note on the planted fault
+## What I don't know yet
 
-The platform ships with one deliberate code-level defect. The incident
-scenarios above expose it, and the incident agent is expected to find it
-from the observability signals alone and propose the fix as a pull request.
-This README does not say what the defect is; the agent's report will.
+I have run Kubernetes clusters that I built and that CKA/CKAD prepared me
+for, not a production fleet platform with thousands of real devices and the
+operational history that comes with it. The simulator here is honest about
+physics but not about the ways real firmware, networks and customers fail.
+I do not yet know how this agent behaves on an alert it has never seen, or
+what its cost looks like at fleet scale with hundreds of incidents a month;
+the measured run above is one run. Those are exactly the things I would want
+to learn with the team that operates the real platform.
+
+— Berkay Türk

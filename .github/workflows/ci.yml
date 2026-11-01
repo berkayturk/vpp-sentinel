@@ -57,6 +57,12 @@ jobs:
           ./promtool check rules deploy/observability/rules/vpp.rules.yaml
           ./promtool test rules deploy/observability/rules/vpp.tests.yaml
 
+  readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-readme.sh
+
   dashboards:
     runs-on: ubuntu-latest
     steps:
