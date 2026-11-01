@@ -108,6 +108,7 @@ class IncidentContext:
     memory: tuple[Incident, ...]
     logs: tuple[str, ...]
     runbook_md: str
+    salt: bytes | None = None
 
 
 async def build_context(alert: Alert, deps: ContextDeps, now: datetime) -> IncidentContext:
@@ -122,6 +123,7 @@ async def build_context(alert: Alert, deps: ContextDeps, now: datetime) -> Incid
         memory=await deps.store.recent_like(alert.name),
         logs=await _logs(deps, timing),
         runbook_md=_runbook(deps.runbooks_dir, alert.name),
+        salt=deps.salt,
     )
 
 
@@ -212,7 +214,11 @@ def _surge_site(stored: MetricSnapshot) -> str | None:
 
 
 def render_context(ctx: IncidentContext) -> str:
-    """The Markdown the model reads as its first user message."""
+    """The Markdown the model reads as its first user message, sanitised as a whole."""
+    return sanitize_text(_render(ctx), ctx.salt)
+
+
+def _render(ctx: IncidentContext) -> str:
     lines = [
         f"# Alert: {ctx.alert.name}",
         "",

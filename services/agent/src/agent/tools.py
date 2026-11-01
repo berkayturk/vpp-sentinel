@@ -49,6 +49,7 @@ MAX_LOG_LINES = 200
 MAX_MINUTES_BACK = 24 * 60
 ATTRIBUTION = re.compile(r"^.*(co-authored-by:|generated with).*$", re.IGNORECASE | re.MULTILINE)
 BRANCH_PREFIX = "agent/"
+SANITISER_MARKERS = re.compile(r"-#[0-9a-f]{6}\b|<ip>|<token>")
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,7 @@ class ToolSet:
     tests_passed: bool = False
     _tools: list = field(default_factory=list, repr=False)
     _pull_request: tuple | None = field(default=None, repr=False)
+    _workspace_ready: bool = field(default=False, repr=False)
 
     @property
     def tools(self) -> list:
@@ -166,6 +168,7 @@ class ToolSet:
         """
         try:
             path = self.deps.guard.resolve(directory)
+            await self._ensure_workspace()
             entries = await self.deps.workspace.list(path)
         except PathRefused as exc:
             return self._done("list_source_files", {"directory": directory}, f"REFUSED: {exc}")
@@ -182,7 +185,9 @@ class ToolSet:
             path: Repository-relative file path.
         """
         try:
-            content = await self.deps.workspace.read(self.deps.guard.resolve(path))
+            target = self.deps.guard.resolve(path)
+            await self._ensure_workspace()
+            content = await self.deps.workspace.read(target)
         except PathRefused as exc:
             return self._done("read_source_file", {"path": path}, f"REFUSED: {exc}")
         except WorkspaceError as exc:
@@ -203,7 +208,7 @@ class ToolSet:
             return await self._record(
                 "restart_deployment", {"name": name}, f"REFUSED: {decision.reason}"
             )
-        last = await self.deps.store.last_restart_at(self.deps.incident.fingerprint)
+        last = await self.deps.store.last_restart_of(name)
         now = self.deps.now()
         if last is not None and now - last < policy.cooldown:
             remaining = policy.cooldown - (now - last)
@@ -226,7 +231,8 @@ class ToolSet:
                 f"ok: restart requested, but the rollout did not complete within"
                 f" {rollout.seconds:.0f} s; check the deployment status before concluding"
             )
-        return await self._record("restart_deployment", {"name": name}, text, stored_outcome="ok")
+        stored = "ok" if rollout.rolled_out else "ok (rollout unconfirmed)"
+        return await self._record("restart_deployment", {"name": name}, text, stored_outcome=stored)
 
     # --- code tools (Tier 3) -----------------------------------------------------
 
@@ -237,8 +243,16 @@ class ToolSet:
             path: Repository-relative file path.
             content: The complete new file content.
         """
+        if SANITISER_MARKERS.search(content):
+            reason = (
+                "REFUSED: the content carries sanitised placeholders (a pseudonymised device id,"
+                " <ip> or <token>); write only what belongs in source code"
+            )
+            return await self._record("write_source_file", {"path": path}, reason)
         try:
-            await self.deps.workspace.write(self.deps.guard.resolve(path), content)
+            target = self.deps.guard.resolve(path)
+            await self._ensure_workspace()
+            await self.deps.workspace.write(target, content)
         except PathRefused as exc:
             return await self._record("write_source_file", {"path": path}, f"REFUSED: {exc}")
         except WorkspaceError as exc:
@@ -248,6 +262,10 @@ class ToolSet:
 
     async def run_tests(self) -> str:
         """Run the ingestion service's test suite in the workspace; returns the output tail."""
+        try:
+            await self._ensure_workspace()
+        except WorkspaceError as exc:
+            return await self._record("run_tests", {}, f"ERROR: {exc}")
         result = await self.deps.workspace.run_tests()
         self.tests_passed = result.passed
         verdict = "passed" if result.passed else "failed"
@@ -385,6 +403,12 @@ class ToolSet:
         return "; appended to the pull request"
 
     # --- plumbing ----------------------------------------------------------------
+
+    async def _ensure_workspace(self) -> None:
+        """Clone on first use so a Tier 2 incident never depends on GitHub being reachable."""
+        if not self._workspace_ready:
+            await self.deps.workspace.prepare()
+            self._workspace_ready = True
 
     def _public_text(self, text: str) -> str:
         """Anything that leaves for GitHub: no attribution lines, no identifiers, no secrets."""

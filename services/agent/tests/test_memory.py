@@ -102,10 +102,8 @@ async def test_recent_like_returns_resolved_newest_first_without_open_ones(store
     assert still_open.id not in [i.id for i in recent]
 
 
-async def test_last_restart_at_reads_the_newest_ok_restart(store: PostgresIncidentStore):
-    assert await store.last_restart_at("VppIngestionLagHigh|-|-") == datetime(
-        2026, 10, 18, 9, 16, 5, tzinfo=UTC
-    )
+async def test_last_restart_of_reads_the_newest_ok_restart(store: PostgresIncidentStore):
+    assert await store.last_restart_of("ingestion") == datetime(2026, 10, 18, 9, 16, 5, tzinfo=UTC)
     opened = await store.open(LAG)
     later = NOW + timedelta(minutes=3)
     await store.record_action(
@@ -117,9 +115,7 @@ async def test_last_restart_at_reads_the_newest_ok_restart(store: PostgresIncide
             "at": later.isoformat(),
         },
     )
-    assert await store.last_restart_at("VppIngestionLagHigh|-|-") == datetime(
-        2026, 10, 18, 9, 16, 5, tzinfo=UTC
-    )
+    assert await store.last_restart_of("ingestion") == datetime(2026, 10, 18, 9, 16, 5, tzinfo=UTC)
     await store.record_action(
         opened.id,
         {
@@ -129,8 +125,8 @@ async def test_last_restart_at_reads_the_newest_ok_restart(store: PostgresIncide
             "at": later.isoformat(),
         },
     )
-    assert await store.last_restart_at("VppIngestionLagHigh|-|-") == later
-    assert await store.last_restart_at("VppSiteDevicesDark|como|charger") is None
+    assert await store.last_restart_of("ingestion") == later
+    assert await store.last_restart_of("postgres") is None
 
 
 def test_fake_store_satisfies_the_protocol():

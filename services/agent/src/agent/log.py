@@ -10,10 +10,28 @@ import sys
 
 import structlog
 
+from agent.sanitize import sanitize_text
+
+
+def _sanitise_event(_logger, _method, event_dict: dict) -> dict:
+    """No device id, address or token leaves this process in a log line."""
+    return _sanitise_value(event_dict)
+
+
+def _sanitise_value(value):
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, dict):
+        return {k: _sanitise_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitise_value(v) for v in value]
+    return value
+
 
 def _pre_chain() -> list:
     return [
         structlog.contextvars.merge_contextvars,
+        _sanitise_event,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", key="ts"),

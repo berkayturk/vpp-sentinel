@@ -229,3 +229,26 @@ async def test_repeated_log_lines_are_grouped_with_counts(runbooks: Path):
     assert "40 similar lines" in joined and "telemetry.rejected" in joined
     assert "mqtt.disconnected" in joined
     assert "como-charger-0" not in joined
+
+
+async def test_rendered_context_is_sanitised_everywhere(runbooks: Path):
+    noisy = Alert(
+        name="VppSiteDevicesDark",
+        labels={
+            "alertname": "VppSiteDevicesDark",
+            "site": "como",
+            "device_type": "charger",
+            "severity": "critical",
+            "instance": "10.244.0.7:8000",
+            "pod": "ingestion-x",
+        },
+        annotations={"summary": "como-charger-012 is dark; see ghp_abcdefABCDEF123456"},
+        starts_at=STARTED,
+    )
+    (runbooks / "site-devices-dark.md").write_text(
+        "# Runbook\n\nssh 10.0.0.1 and check como-charger-003"
+    )
+    ctx = await build_context(noisy, await _deps(runbooks, FakeIncidentStore()), NOW)
+    text = render_context(ctx)
+    for leak in ("10.244.0.7", "como-charger-012", "ghp_", "10.0.0.1", "como-charger-003"):
+        assert leak not in text

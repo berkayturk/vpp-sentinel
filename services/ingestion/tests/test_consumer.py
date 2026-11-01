@@ -138,10 +138,12 @@ async def test_rejected_messages_log_a_payload_sample_and_the_validation_detail(
     from ingestion.consumer import handle_message
     from ingestion.registry import LastSeen
 
+    # A synthetic reject: a required field is missing. The sample and the validation
+    # message must reach the log so an operator can see what arrived.
     raw = (
         b'{"device_id":"como-charger-001","site":"como","device_type":"charger",'
-        b'"ts":1793455500000,"firmware":"2.4.0","status":"charging",'
-        b'"power_kw":7.4,"energy_kwh":12.5,"soc_pct":null,"voltage_v":231.2}'
+        b'"ts":"2026-10-31T14:05:00Z","firmware":"9.9.9","status":"charging",'
+        b'"power_kw":7.4,"energy_kwh":12.5,"soc_pct":null}'
     )
     with structlog.testing.capture_logs() as logs:
         await handle_message(
@@ -153,7 +155,7 @@ async def test_rejected_messages_log_a_payload_sample_and_the_validation_detail(
             FLEET,
         )
     rejected = [e for e in logs if e["event"] == "telemetry.rejected"][0]
-    assert rejected["reason"] == "invalid_timestamp"
-    assert '"ts":1793455500000' in rejected["payload_sample"]
-    assert "ts" in rejected["detail"]
+    assert rejected["reason"] == "missing_field"
+    assert '"firmware":"9.9.9"' in rejected["payload_sample"]
+    assert "voltage_v" in rejected["detail"]
     assert len(rejected["payload_sample"]) <= 300

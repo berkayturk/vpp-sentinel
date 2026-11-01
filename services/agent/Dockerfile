@@ -21,10 +21,11 @@ RUN apt-get update \
  && useradd --system --uid 10001 --create-home app \
  && mkdir -p /workspace && chown app:app /workspace
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --from=builder --chown=app:app /app/services/agent /app/services/agent
-COPY --chown=app:app allowlist.yaml /app/allowlist.yaml
-COPY --chown=app:app docs/runbooks /app/docs/runbooks
+# /app stays root-owned: the agent user can read but never change its own code or allowlist.
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/services/agent /app/services/agent
+COPY allowlist.yaml /app/allowlist.yaml
+COPY docs/runbooks /app/docs/runbooks
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HTTP_PORT=8001 \

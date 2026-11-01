@@ -184,15 +184,16 @@ class FakeIncidentStore:
         done = [r for r in self.rows if r.alert_name == alert_name and r.resolved_at is not None]
         return tuple(sorted(done, key=lambda r: r.started_at, reverse=True)[:limit])
 
-    async def last_restart_at(self, fingerprint: str):
+    async def last_restart_of(self, deployment: str):
         from datetime import datetime
 
         times = [
             datetime.fromisoformat(a["at"])
             for r in self.rows
-            if r.fingerprint == fingerprint
             for a in r.actions_taken
-            if a.get("tool") == "restart_deployment" and a.get("outcome") == "ok"
+            if a.get("tool") == "restart_deployment"
+            and a.get("args", {}).get("name") == deployment
+            and str(a.get("outcome", "")).startswith("ok")
         ]
         return max(times) if times else None
 

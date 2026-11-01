@@ -8,6 +8,7 @@ incident) — and the poller decides what happens next.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ log = structlog.get_logger("agent.loop")
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "system.md"
 DEFAULT_MAX_ITERATIONS = 40
+DEFAULT_TIMEOUT_SECONDS = 900.0
 MAX_TOKENS = 16000
 INCOMPLETE_HEADER = "# Incident report (incomplete)\n\nThe agent stopped before filing a report."
 
@@ -102,14 +104,22 @@ async def run_incident(
     runner: ModelRunner,
     store: IncidentStore,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> IncidentOutcome:
     started = time.monotonic()
     incident = toolset.deps.incident
     bound = log.bind(incident_id=incident.id, alert=ctx.alert.name)
     try:
-        result = await runner.run(
-            load_system_prompt(), render_context(ctx), toolset.tools, max_iterations
+        result = await asyncio.wait_for(
+            runner.run(load_system_prompt(), render_context(ctx), toolset.tools, max_iterations),
+            timeout=timeout_seconds,
         )
+    except TimeoutError:
+        outcome_text = f"error: the model run timed out after {timeout_seconds:g} s"
+        bound.error("incident.model_timed_out", seconds=timeout_seconds)
+        await _record_quietly(store, incident.id, outcome_text, toolset)
+        metrics.record_incident(ctx.alert.name, "error", time.monotonic() - started)
+        return IncidentOutcome("error", None, "", Usage())
     except Exception as exc:
         outcome_text = f"error: {_describe(exc)}"
         bound.error("incident.model_failed", error=outcome_text)

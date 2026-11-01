@@ -223,3 +223,70 @@ async def test_symlinked_parent_directories_are_refused(bare: Path, tmp_path: Pa
         await ws.commit_and_push(
             "agent/symlink-dir", "fix: x", paths=("services/ingestion/tests/evil/leak.py",)
         )
+
+
+async def test_second_push_to_the_same_branch_updates_it(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 1\n")
+    first = await ws.commit_and_push(
+        "agent/same", "fix: one", paths=("services/ingestion/tests/test_fix.py",)
+    )
+    await ws.write(ws.root / "services/ingestion/tests/test_fix.py", "x = 2\n")
+    second = await ws.commit_and_push(
+        "agent/same", "fix: two", paths=("services/ingestion/tests/test_fix.py",)
+    )
+    assert first != second
+    assert _git("rev-parse", "agent/same", cwd=bare).strip() == second
+
+
+async def test_workspace_hides_code_outside_the_agent_scope(bare: Path, tmp_path: Path):
+    seed = tmp_path / "seed2"
+    _git("clone", "-q", str(bare), str(seed), cwd=tmp_path)
+    (seed / "services/fleet-simulator/src/fleet_simulator").mkdir(parents=True)
+    (seed / "services/fleet-simulator/src/fleet_simulator/payload.py").write_text("secret = 1\n")
+    (seed / "services/fleet-simulator/pyproject.toml").write_text("[project]\nname='x'\n")
+    (seed / "docs").mkdir()
+    (seed / "docs/architecture.md").write_text("# arch\n")
+    _git("add", "-A", cwd=seed)
+    _git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "more",
+        cwd=seed,
+    )
+    _git("push", "-q", "origin", "HEAD:main", cwd=seed)
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    assert not (ws.root / "services/fleet-simulator/src/fleet_simulator/payload.py").exists()
+    assert not (ws.root / "docs").exists()
+    assert (ws.root / "services/fleet-simulator/pyproject.toml").exists()
+    assert (ws.root / "services/ingestion/src/ingestion/schema.py").exists()
+
+
+async def test_run_tests_kills_the_whole_process_group_on_timeout(bare: Path, tmp_path: Path):
+    import time
+
+    marker = tmp_path / "still-alive"
+    ws = GitWorkspace(
+        repo_url=str(bare),
+        root=tmp_path / "ws",
+        token_provider=lambda: TOKEN,
+        author="Agent Test <agent@example.com>",
+        test_command=(
+            "sh",
+            "-c",
+            f"(sleep 3; touch {marker}) & sleep 10",
+        ),
+        test_timeout_seconds=0.5,
+    )
+    await ws.prepare()
+    result = await ws.run_tests()
+    assert not result.passed and "timed out" in result.output
+    time.sleep(3.5)
+    assert not marker.exists()

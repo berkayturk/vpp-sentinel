@@ -91,7 +91,7 @@ def test_open_incident_whose_alert_is_gone_is_resolved():
 
 def test_critical_alert_also_pages():
     events = decide(active=(DARK,), open_incidents=(), now=NOW)
-    assert events == (OpenIncident(DARK), Page(DARK))
+    assert events == (Page(DARK), OpenIncident(DARK))
 
 
 def test_resolution_after_a_recent_restart_says_mitigation_worked():
@@ -129,7 +129,7 @@ async def test_poll_reads_active_alerts_and_open_incidents():
     )
     events = await poll(deps, NOW)
     kinds = [type(e).__name__ for e in events]
-    assert kinds == ["OpenIncident", "Page", "ResolveIncident"]
+    assert kinds == ["Page", "OpenIncident", "ResolveIncident"]
 
 
 async def test_handle_open_runs_the_agent_pages_and_annotates(tmp_path: Path):
@@ -249,3 +249,68 @@ def _deps(
         salt=b"svc",
         now=lambda: NOW,
     )
+
+
+def test_page_comes_before_the_model_run_and_duplicates_collapse():
+    twin = Alert(name=DARK.name, labels=dict(DARK.labels), annotations={}, starts_at=NOW)
+    events = decide(active=(DARK, twin), open_incidents=(), now=NOW)
+    assert events == (Page(DARK), OpenIncident(DARK))
+
+
+async def test_refused_or_failed_runs_page_a_human(tmp_path: Path):
+    store = FakeIncidentStore()
+    grafana_rec = Recorder()
+    deps = _deps(
+        store,
+        grafana=client(json_router({"/api/annotations": {"id": 3}}, grafana_rec)),
+        root=tmp_path,
+    )
+    deps.runner.explode = True
+    await handle_events((OpenIncident(LAG),), deps)
+    assert grafana_rec.paths() == ["POST /api/annotations"]
+
+
+async def test_model_runs_are_bounded_by_a_wall_clock_timeout(tmp_path: Path):
+    import asyncio
+
+    from agent.loop import run_incident
+    from agent.tools import ToolDeps, make_tools
+
+    store = FakeIncidentStore()
+    incident = await store.open(LAG)
+    root = tmp_path / "ws"
+    (root / "services/ingestion").mkdir(parents=True)
+    deps = ToolDeps(
+        prometheus=client(json_router({}, Recorder())),
+        loki=client(json_router({}, Recorder())),
+        kube=client(json_router({}, Recorder())),
+        github=client(json_router({}, Recorder())),
+        store=store,
+        workspace=FakeWorkspace(root, files={}),
+        policy=load_allowlist(Path(__file__).resolve().parents[3] / "allowlist.yaml"),
+        guard=PathGuard(root, allowed=("services/ingestion/",), forbidden=FORBIDDEN),
+        incident=incident,
+        now=lambda: NOW,
+        repo="o/r",
+        salt=b"t",
+    )
+    from agent.context import BlastRadius, IncidentContext, Timing
+
+    ctx = IncidentContext(
+        alert=LAG,
+        timing=Timing(NOW, NOW, NOW),
+        metrics=(),
+        blast_radius=BlastRadius((), None),
+        severity="warning",
+        memory=(),
+        logs=(),
+        runbook_md="",
+    )
+
+    class Slow:
+        async def run(self, system, user, tools, max_iterations):
+            await asyncio.sleep(5)
+
+    outcome = await run_incident(ctx, make_tools(deps), Slow(), store, timeout_seconds=0.1)
+    assert outcome.status == "error"
+    assert "timed out" in store.rows[0].actions_taken[-1]["outcome"]

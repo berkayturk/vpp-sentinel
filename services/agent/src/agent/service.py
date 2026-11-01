@@ -83,12 +83,15 @@ def decide(
     open_by_fp = {i.fingerprint: i for i in open_incidents}
     active_fps = {fingerprint(a) for a in active}
     events: list[Event] = []
+    seen: set[str] = set()
     for alert in active:
-        if fingerprint(alert) in open_by_fp:
+        fp = fingerprint(alert)
+        if fp in open_by_fp or fp in seen:
             continue
-        events.append(OpenIncident(alert))
+        seen.add(fp)
         if alert.severity == PAGE_SEVERITY:
-            events.append(Page(alert))
+            events.append(Page(alert))  # before the run: a page must not wait for the model
+        events.append(OpenIncident(alert))
     for fp, incident in open_by_fp.items():
         if fp not in active_fps:
             events.append(ResolveIncident(incident, resolution_outcome(incident, now)))
@@ -139,8 +142,7 @@ async def _handle(event: Event, deps: ServiceDeps) -> None:
 async def _open(alert: Alert, deps: ServiceDeps) -> None:
     incident = await deps.store.open(alert)
     log.info("incident.opened", incident_id=incident.id, fingerprint=incident.fingerprint)
-    workspace = deps.workspace_factory(slug(incident.fingerprint))
-    await workspace.prepare()
+    workspace = deps.workspace_factory(slug(incident.fingerprint))  # cloned lazily by the tools
     ctx = await build_context(
         alert,
         ContextDeps(deps.prometheus, deps.loki, deps.store, deps.runbooks_dir, deps.salt),
@@ -170,8 +172,17 @@ async def _open(alert: Alert, deps: ServiceDeps) -> None:
         status=outcome.status,
         report=outcome.report.model_dump(mode="json") if outcome.report else None,
     )
-    if outcome.report is not None and outcome.report.page_human and alert.severity != PAGE_SEVERITY:
+    if alert.severity != PAGE_SEVERITY and _needs_a_human(outcome, toolset.log):
         await _page(alert, deps)
+
+
+def _needs_a_human(outcome, calls) -> bool:
+    """Page when the model asked for it, could not finish, or had its action refused."""
+    if outcome.status != "reported":
+        return True
+    if outcome.report is not None and outcome.report.page_human:
+        return True
+    return any(c.tool == "restart_deployment" and c.outcome.startswith("REFUSED") for c in calls)
 
 
 async def _page(alert: Alert, deps: ServiceDeps) -> None:

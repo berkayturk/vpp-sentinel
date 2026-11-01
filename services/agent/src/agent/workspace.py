@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import signal
 import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -48,6 +49,7 @@ class Workspace(Protocol):
     root: Path
 
     async def prepare(self) -> None: ...
+
     async def read(self, path: Path) -> str: ...
     async def write(self, path: Path, content: str) -> None: ...
     async def list(self, path: Path) -> tuple[str, ...]: ...
@@ -67,7 +69,9 @@ class GitWorkspace:
         test_command: Sequence[str] = DEFAULT_TEST_COMMAND,
         push_url: str = DEFAULT_PUSH_URL,
         repo: str = "",
+        test_timeout_seconds: float = TEST_TIMEOUT_SECONDS,
     ) -> None:
+        self._test_timeout = test_timeout_seconds
         self.repo_url = repo_url
         self.root = root
         self._token_provider = token_provider
@@ -91,6 +95,7 @@ class GitWorkspace:
             str(self.root),
             cwd=self.root.parent,
         )
+        _prune_outside_scope(self.root)
 
     async def read(self, path: Path) -> str:
         try:
@@ -115,13 +120,14 @@ class GitWorkspace:
         return tuple(sorted(_parse_status(out)))
 
     async def run_tests(self) -> TestResult:
-        """Run the test command with a minimal environment: no secrets, no inherited config."""
+        """Run the test command in its own process group with a minimal environment."""
         try:
             output = await _run(
                 list(self._test_command),
                 cwd=self.root,
-                timeout=TEST_TIMEOUT_SECONDS,
+                timeout=self._test_timeout,
                 env=_test_env(self.root),
+                own_group=True,
             )
         except WorkspaceError as exc:
             return TestResult(False, str(exc))
@@ -160,9 +166,7 @@ class GitWorkspace:
         token = self._token_provider() or ""
         # Without a GitHub repo name (local repositories in tests) the clone source is the remote.
         url = self._push_url.format(token=token, repo=self._repo) if self._repo else self.repo_url
-        await _git(
-            *PUSH_HARDENING, "push", "-q", "--force-with-lease", url, f"HEAD:{branch}", cwd=clean
-        )
+        await _git(*PUSH_HARDENING, "push", "-q", "--force", url, f"HEAD:{branch}", cwd=clean)
         return sha
 
 
@@ -206,9 +210,10 @@ def _git_env() -> dict[str, str]:
 async def _run(
     cmd: list[str],
     cwd: Path,
-    timeout: int = COMMAND_TIMEOUT_SECONDS,
+    timeout: float = COMMAND_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
     raw: bool = False,
+    own_group: bool = False,
 ) -> str:
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -217,15 +222,61 @@ async def _run(
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=own_group,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except (OSError, TimeoutError) as exc:
+    except OSError as exc:
         raise WorkspaceError(sanitize_text(f"{cmd[0]} failed: {exc}")) from exc
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError as exc:
+        _kill(proc, own_group)
+        raise WorkspaceError(f"{cmd[0]} timed out after {timeout:g} s and was killed") from exc
     decoded = out.decode(errors="replace")
     output = decoded if raw else sanitize_text(decoded)
     if proc.returncode != 0:
         raise WorkspaceError(f"{cmd[0]} exited {proc.returncode}: {_tail(sanitize_text(decoded))}")
     return output
+
+
+def _kill(proc: asyncio.subprocess.Process, whole_group: bool) -> None:
+    """Kill the command and, for test runs, everything it started in its session."""
+    try:
+        if whole_group:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except ProcessLookupError:
+        pass
+
+
+# Only the platform code the agent may read stays in the workspace; the simulator (the "device
+# fleet"), the agent itself and the docs are removed after the clone. Their pyproject files stay
+# so the uv workspace still resolves, with empty packages as the Dockerfile does.
+OUT_OF_SCOPE = (
+    "services/fleet-simulator/src",
+    "services/agent/src",
+    "services/agent/tests",
+    "docs",
+)
+STUB_PACKAGES = (
+    "services/fleet-simulator/src/fleet_simulator",
+    "services/agent/src/agent",
+)
+
+
+def _prune_outside_scope(root: Path) -> None:
+    for relative in OUT_OF_SCOPE:
+        target = root / relative
+        if target.exists():
+            shutil.rmtree(target)
+    for relative in STUB_PACKAGES:
+        (root / relative).mkdir(parents=True, exist_ok=True)
+        (root / relative / "__init__.py").touch()
+    # The stubs are scaffolding, not changes: keep them out of git status.
+    exclude = root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a") as handle:
+        handle.write("".join(f"/{relative}/__init__.py\n" for relative in STUB_PACKAGES))
 
 
 def _parse_status(porcelain_z: str) -> list[str]:

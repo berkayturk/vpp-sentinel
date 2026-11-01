@@ -282,11 +282,24 @@ measured run on Opus: the firmware-drift incident, from alert to an open pull
 request, took two minutes, 20 tool calls and about 350 k input / 12 k output
 tokens.
 
-### Known limitation
+### Known limitations (read before trusting the boundaries)
 
-Model-written tests execute inside the agent pod. They run with a bare
-environment (no API key or token) and cannot change build files, but the
-pod's service-account token is mounted and readable by a test process. That
-token can only patch the one allowlisted deployment, so the blast radius
-equals the agent's own authority; a production deployment would run the test
-suite in a separate job with no service account.
+- **Model-written tests run inside the agent pod**, as the same user as the
+  agent. They get a bare environment and their own process group (killed on
+  timeout), cannot change build files, and the commit is made from a second
+  clone they never ran in — but a test process can still read the agent's
+  environment through `/proc`, and so reach the API key and the GitHub
+  token. The honest fix is a separate test-runner container or job with no
+  secrets and no service account; until then, treat the GitHub token as
+  exposed to whatever the model writes, and scope it to this repository
+  only.
+- **The service-account token can patch one deployment.** Role RBAC limits
+  it to `deployments/ingestion`, and a `ValidatingAdmissionPolicy` in the
+  chart rejects any change to that deployment other than the restart
+  annotation (image, command, volumes and replicas must stay equal).
+- **`CODEOWNERS` blocks nothing by itself.** Turn on branch protection for
+  `main` with *Require review from Code Owners* so the paths it lists really
+  need the author's approval; the PR tool's path guard is the first line.
+- **Secrets on the push command line.** The token is passed in the push URL
+  of a short-lived `git` process; a concurrent process of the same user could
+  read it. The runner-container design above removes this too.

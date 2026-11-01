@@ -15,7 +15,8 @@ _Work in progress — see `docs/architecture.md` for what is built so far._
   - `GITHUB_TOKEN`: a fine-grained personal access token for the repository the
     agent should open pull requests on, with *Contents: write* and
     *Pull requests: write*; set `agent.repo` in `deploy/chart/values.yaml` to your
-    fork. The agent never merges.
+    fork. The agent never merges; enable branch protection with Code Owner review
+    on `main` so `CODEOWNERS` is enforced.
 
 `make demo` stores both values in a Kubernetes Secret in the cluster; they are never
 written to the repository.

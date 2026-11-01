@@ -56,7 +56,7 @@ class IncidentStore(Protocol):
     async def save_report(self, incident_id: int, report_md: str) -> Incident: ...
     async def resolve(self, incident_id: int, outcome: str) -> Incident: ...
     async def recent_like(self, alert_name: str, limit: int = 3) -> tuple[Incident, ...]: ...
-    async def last_restart_at(self, fingerprint: str) -> datetime | None: ...
+    async def last_restart_of(self, deployment: str) -> datetime | None: ...
     async def close(self) -> None: ...
 
 
@@ -134,13 +134,14 @@ class PostgresIncidentStore:
         )
         return tuple(_incident(row) for row in rows)
 
-    async def last_restart_at(self, fingerprint: str) -> datetime | None:
+    async def last_restart_of(self, deployment: str) -> datetime | None:
+        """The newest successful restart of ``deployment`` across every incident."""
         value = await self._pool.fetchval(
             "SELECT max((a->>'at')::timestamptz) FROM incidents,"
             " jsonb_array_elements(actions_taken) AS a"
-            " WHERE fingerprint = $1 AND a->>'tool' = 'restart_deployment'"
-            " AND a->>'outcome' = 'ok'",
-            fingerprint,
+            " WHERE a->>'tool' = 'restart_deployment' AND a->'args'->>'name' = $1"
+            " AND a->>'outcome' LIKE 'ok%'",
+            deployment,
         )
         return value
 

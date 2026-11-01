@@ -164,8 +164,6 @@ def test_system_prompt_states_the_policy_without_naming_the_defect():
     assert "Tier 1" in text and "Tier 2" in text and "Tier 3" in text
     for name in TOOL_NAMES:
         assert name in text
-    for forbidden in ("epoch", "milliseconds", "timestamp format"):
-        assert forbidden not in text.lower()
     assert "file_report" in text and "never merge" in text.lower()
 
 

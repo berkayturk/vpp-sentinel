@@ -115,3 +115,17 @@ def test_path_guard_accepts_the_scope_directory_itself(guard: PathGuard, tmp_pat
     assert guard.resolve("services/ingestion/") == (tmp_path / "services/ingestion").resolve()
     with pytest.raises(PathRefused):
         guard.resolve("services/ingestionX")
+
+
+@pytest.mark.parametrize(
+    "sneaky",
+    [
+        "services/ingestion/../../allowlist.yaml",
+        "services/ingestion/./x.py",
+        "services/ingestion/.git/config",
+        "/services/ingestion/x.py",
+        "services/ingestion/src/../../agent/x.py",
+    ],
+)
+def test_diff_check_rejects_unnormalised_paths(guard: PathGuard, sneaky: str):
+    assert not guard.check_diff([sneaky]).allowed

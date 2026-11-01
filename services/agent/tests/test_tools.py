@@ -372,3 +372,49 @@ async def test_pull_request_text_and_appended_report_are_sanitised(setup):
     for leak in ("como-charger-012", "ghp_", "10.244.0.9", "sk-ant-", "Co-Authored-By"):
         assert leak not in sent
     assert "como-charger-#" in sent
+
+
+async def test_write_refuses_content_that_carries_sanitiser_markers(setup):
+    ts = await _toolset(setup)
+    for bad in ("x = 'como-charger-#a1b2c3'", "host = '<ip>'", "token = '<token>'"):
+        out = await ts.write_source_file(path="services/ingestion/tests/test_fix.py", content=bad)
+        assert out.startswith("REFUSED") and "sanitis" in out
+    assert (
+        await ts.write_source_file(path="services/ingestion/tests/test_fix.py", content="x = 1\n")
+    ).startswith("ok")
+
+
+async def test_cooldown_is_per_deployment_not_per_incident(setup):
+    ts = await _toolset(setup)
+    await ts.restart_deployment(name="ingestion")
+    other = Alert(
+        name="VppIngestionLagHigh",
+        labels={"alertname": "VppIngestionLagHigh", "severity": "warning"},
+        annotations={},
+        starts_at=NOW,
+    )
+    incident = await setup["store"].open(other)
+    deps = ToolDeps(
+        **setup["deps_kw"],
+        store=setup["store"],
+        workspace=setup["workspace"],
+        policy=setup["allow"],
+        guard=setup["guard"],
+        incident=incident,
+        now=lambda: NOW + timedelta(minutes=5),
+        repo="o/r",
+        salt=SALT,
+    )
+    out = await make_tools(deps).restart_deployment(name="ingestion")
+    assert out.startswith("REFUSED") and "cooldown" in out
+
+
+async def test_code_tools_prepare_the_workspace_lazily(setup):
+    ts = await _toolset(setup)
+    assert setup["workspace"].prepared == 0
+    await ts.query_prometheus(expr="up")
+    assert setup["workspace"].prepared == 0
+    await ts.read_source_file(path="services/ingestion/src/ingestion/schema.py")
+    assert setup["workspace"].prepared == 1
+    await ts.list_source_files(directory="services/ingestion")
+    assert setup["workspace"].prepared == 1

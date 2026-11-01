@@ -58,11 +58,25 @@ spec:
         prometheus.io/path: /metrics
     spec:
       serviceAccountName: agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: agent
           image: {{ .Values.images.agent }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
+            - name: HOME
+              value: /tmp/home
+            - name: UV_CACHE_DIR
+              value: /tmp/uv-cache
             - name: HTTP_PORT
               value: "8001"
             - name: LOG_LEVEL
@@ -126,11 +140,52 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
       volumes:
         - name: workspace
           emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# The agent's only write to the cluster is a rollout restart. RBAC limits it to this deployment;
+# this policy limits the patch itself: everything but the restart annotation must stay equal.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-restart-only
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["deployments"]
+  matchConditions:
+    - name: only-the-agent
+      expression: "request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:agent'"
+  validations:
+    - expression: "object.spec.template.spec == oldObject.spec.template.spec"
+      message: "the agent may only restart a deployment, not change its pod spec"
+    - expression: "object.spec.replicas == oldObject.spec.replicas && object.spec.selector == oldObject.spec.selector"
+      message: "the agent may not scale or reselect a deployment"
+    - expression: "object.spec.template.metadata.labels == oldObject.spec.template.metadata.labels"
+      message: "the agent may not relabel pods"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-restart-only
+spec:
+  policyName: agent-restart-only
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace }}
 ---
 apiVersion: v1
 kind: Service

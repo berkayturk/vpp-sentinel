@@ -7,6 +7,7 @@ reason the model can read; nothing here raises into the model loop except
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -100,8 +101,12 @@ class PathGuard:
         return resolved
 
     def check_diff(self, paths: Iterable[str]) -> Decision:
-        """Every changed path must be inside the allowed scope and outside the forbidden one."""
-        refused = [p for p in paths if not self._check_relative(p).allowed]
+        """Every changed path must be inside the allowed scope and outside the forbidden one.
+
+        Paths come from a git status the model's tests may have influenced, so
+        anything that is not a plain normalised relative path is refused too.
+        """
+        refused = [p for p in paths if not _normalised(p) or not self._check_relative(p).allowed]
         if refused:
             return Decision(False, f"paths outside the agent's scope: {', '.join(refused)}")
         return Decision(True)
@@ -119,3 +124,12 @@ class PathGuard:
 def _within(relative: str, prefix: str) -> bool:
     """``services/ingestion`` and anything below ``services/ingestion/`` are inside the scope."""
     return relative == prefix.rstrip("/") or relative.startswith(prefix)
+
+
+def _normalised(relative: str) -> bool:
+    parts = relative.split("/")
+    return (
+        relative == posixpath.normpath(relative)
+        and not relative.startswith("/")
+        and all(part not in ("", ".", "..", ".git") for part in parts)
+    )
