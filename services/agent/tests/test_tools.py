@@ -55,9 +55,22 @@ def _github_router(rec: Recorder, existing_pr: dict | None = None) -> httpx.Mock
 
 def _kube_router(rec: Recorder) -> httpx.MockTransport:
     def patch(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "metadata": {"generation": 3},
+                    "spec": {"replicas": 1},
+                    "status": {
+                        "observedGeneration": 3,
+                        "updatedReplicas": 1,
+                        "availableReplicas": 1,
+                    },
+                },
+            )
         assert request.method == "PATCH"
         assert "restartedAt" in request.read().decode()
-        return httpx.Response(200, json={"metadata": {"name": "ingestion"}})
+        return httpx.Response(200, json={"metadata": {"name": "ingestion", "generation": 3}})
 
     return json_router({"/apis/apps/v1/namespaces/vpp/deployments/ingestion": patch}, rec)
 
@@ -155,7 +168,7 @@ async def test_restart_allowed_patches_the_deployment_and_is_recorded(setup):
     ts = await _toolset(setup)
     out = await ts.restart_deployment(name="ingestion")
     assert out.startswith("ok")
-    assert setup["recs"]["kube"].paths() == [
+    assert [p for p in setup["recs"]["kube"].paths() if p.startswith("PATCH")] == [
         "PATCH /apis/apps/v1/namespaces/vpp/deployments/ingestion"
     ]
     stored = await setup["store"].find_open("VppSiteDevicesDark|como|charger")
@@ -169,7 +182,7 @@ async def test_restart_refused_during_cooldown(setup):
     later = await _toolset(setup, now=NOW + timedelta(minutes=5))
     out = await later.restart_deployment(name="ingestion")
     assert out.startswith("REFUSED") and "cooldown" in out
-    assert len(setup["recs"]["kube"].requests) == 1
+    assert sum(1 for r in setup["recs"]["kube"].requests if r.method == "PATCH") == 1
 
 
 async def test_read_source_file_is_scoped_and_sanitised(setup):
@@ -291,3 +304,22 @@ async def test_client_errors_become_tool_errors_not_exceptions(setup):
     out = await ts.query_prometheus(expr="up", minutes_back=1_000_000)
     assert isinstance(out, str)
     assert (await ts.lookup_incident_memory(alertname="x")) is not None
+
+
+async def test_every_tool_call_is_logged_as_an_event(setup):
+    import structlog
+
+    ts = await _toolset(setup)
+    with structlog.testing.capture_logs() as logs:
+        await ts.restart_deployment(name="postgres")
+        await ts.read_source_file(path="services/ingestion/src/ingestion/schema.py")
+    events = [(e["event"], e.get("tool"), e.get("outcome_class")) for e in logs]
+    assert ("incident.tool_call", "restart_deployment", "refused") in events
+    assert ("incident.tool_call", "read_source_file", "ok") in events
+    assert all("como-charger-012" not in json.dumps(e) for e in logs)
+
+
+async def test_restart_result_tells_whether_the_rollout_completed(setup):
+    ts = await _toolset(setup)
+    out = await ts.restart_deployment(name="ingestion")
+    assert out.startswith("ok") and "rolled out" in out

@@ -45,7 +45,9 @@ outside your authority: say so in the report and recommend it to a human instead
      body that explains the change and how it was verified.
 4. Finish with `file_report`. Be specific: numbers, sites, device groups, timestamps. Evidence is
    a list of observations, not conclusions. Verification lists what you checked, including what
-   you ruled out. If the severity is critical, set `page_human` to true.
+   you ruled out. Set `page_human` to true only when the severity is critical, or when an
+   allowlisted action was refused or did not resolve the symptom and a human must act now; a
+   warning that you mitigated is not a page.
 
 ## Rules
 

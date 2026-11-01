@@ -7,6 +7,7 @@ defined needs no guard. Every tool returns a string; refusals start with
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -14,16 +15,20 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+import structlog
 from anthropic import beta_async_tool
 
 from agent.clients import github, kube, loki, prometheus
 from agent.clients.errors import ClientError
 from agent.fingerprint import slug
 from agent.memory import Incident, IncidentStore
+from agent.metrics import outcome_class
 from agent.policy import Allowlist, PathGuard, PathRefused
 from agent.report import ActionRecord, IncidentReport, render_markdown
 from agent.sanitize import sanitize_text
 from agent.workspace import Workspace, WorkspaceError
+
+log = structlog.get_logger("agent.tools")
 
 TOOL_NAMES = (
     "query_prometheus",
@@ -208,10 +213,19 @@ class ToolSet:
             )
             return await self._record("restart_deployment", {"name": name}, reason)
         try:
-            await kube.restart_deployment(self.deps.kube, policy.restart_namespace, name, now)
+            rollout = await kube.restart_deployment(
+                self.deps.kube, policy.restart_namespace, name, now
+            )
         except ClientError as exc:
             return await self._record("restart_deployment", {"name": name}, f"ERROR: {exc}")
-        return await self._record("restart_deployment", {"name": name}, "ok", stored_outcome="ok")
+        if rollout.rolled_out:
+            text = f"ok: {name} rolled out in {rollout.seconds:.0f} s; a new pod is serving"
+        else:
+            text = (
+                f"ok: restart requested, but the rollout did not complete within"
+                f" {rollout.seconds:.0f} s; check the deployment status before concluding"
+            )
+        return await self._record("restart_deployment", {"name": name}, text, stored_outcome="ok")
 
     # --- code tools (Tier 3) -----------------------------------------------------
 
@@ -355,6 +369,14 @@ class ToolSet:
     def _done(self, tool: str, args: dict[str, Any], outcome: str) -> str:
         clean = sanitize_text(outcome, self.deps.salt)
         self.log = (*self.log, ToolCall(tool, args, _short(clean), self.deps.now()))
+        log.info(
+            "incident.tool_call",
+            incident_id=self.deps.incident.id,
+            tool=tool,
+            args=json.loads(sanitize_text(json.dumps(args), self.deps.salt)),
+            outcome_class=outcome_class(clean),
+            outcome=_short(clean, 160),
+        )
         return clean
 
     async def _record(

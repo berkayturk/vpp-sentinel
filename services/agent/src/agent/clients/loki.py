@@ -30,7 +30,7 @@ async def query_range(
         start=str(int(start.timestamp() * NANOS)),
         end=str(int(end.timestamp() * NANOS)),
         limit=str(limit),
-        direction="forward",
+        direction="backward",
     )
     streams = raw.get("data", {}).get("result") if isinstance(raw, dict) else None
     if not isinstance(streams, list):

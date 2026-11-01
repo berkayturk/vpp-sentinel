@@ -44,6 +44,9 @@ def configure_logging(service: str, level: str = "INFO") -> None:
     # Replace rather than append so a second call stays idempotent.
     root.handlers = [handler]
     root.setLevel(level)
+    # HTTP client chatter would drown the incident events in Loki.
+    for noisy in ("httpx", "httpcore", "anthropic"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     structlog.contextvars.bind_contextvars(service=service)
     # An exception that escapes the event loop would otherwise print a plain-text
     # traceback to stderr, which the pod log merges with stdout.

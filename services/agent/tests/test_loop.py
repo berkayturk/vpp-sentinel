@@ -41,10 +41,15 @@ async def _setup(tmp_path: Path):
     incident = await store.open(LAG)
     root = tmp_path / "ws"
     (root / "services/ingestion").mkdir(parents=True)
+    rolled_out = {
+        "metadata": {"generation": 1},
+        "spec": {"replicas": 1},
+        "status": {"observedGeneration": 1, "updatedReplicas": 1, "availableReplicas": 1},
+    }
     kube = json_router(
         {
             "/apis/apps/v1/namespaces/vpp/deployments/ingestion": lambda r: httpx.Response(
-                200, json={}
+                200, json=rolled_out
             )
         },
         Recorder(),
@@ -109,7 +114,7 @@ async def test_scripted_run_files_a_report_with_actions_from_the_log(tmp_path: P
     assert outcome.status == "reported"
     assert outcome.report is not None
     assert [a.tool for a in outcome.report.actions_taken] == ["restart_deployment"]
-    assert outcome.report.actions_taken[0].outcome == "ok"
+    assert outcome.report.actions_taken[0].outcome.startswith("ok")
     stored = await store.find_open("VppIngestionLagHigh|-|-")
     assert "# Incident report" in stored.report_md and "mitigation, not a fix" in stored.report_md
     assert (

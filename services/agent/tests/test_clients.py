@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
 from agent.clients import alertmanager, grafana, loki, prometheus
@@ -92,3 +93,70 @@ async def test_malformed_json_becomes_client_error():
     async with client(json_router(routes, rec)) as http:
         with pytest.raises(ClientError):
             await prometheus.instant(http, "up")
+
+
+async def test_kube_restart_waits_until_the_rollout_is_complete():
+    from agent.clients import kube
+
+    rec = Recorder()
+    polls = {"n": 0}
+
+    def deployment(request):
+        if request.method == "PATCH":
+            return httpx.Response(200, json={"metadata": {"generation": 5}})
+        polls["n"] += 1
+        ready = polls["n"] >= 2
+        return httpx.Response(
+            200,
+            json={
+                "metadata": {"generation": 5},
+                "spec": {"replicas": 1},
+                "status": {
+                    "observedGeneration": 5,
+                    "replicas": 1,
+                    "updatedReplicas": 1,
+                    "availableReplicas": 1 if ready else 0,
+                    "unavailableReplicas": 0 if ready else 1,
+                },
+            },
+        )
+
+    routes = {"/apis/apps/v1/namespaces/vpp/deployments/ingestion": deployment}
+    async with client(json_router(routes, rec)) as http:
+        waited = await kube.restart_deployment(
+            http, "vpp", "ingestion", T0, poll_seconds=0.0, timeout_seconds=5.0
+        )
+    assert waited.rolled_out and polls["n"] == 2
+    assert rec.paths()[0] == "PATCH /apis/apps/v1/namespaces/vpp/deployments/ingestion"
+
+
+async def test_kube_restart_reports_an_incomplete_rollout_after_the_timeout():
+    from agent.clients import kube
+
+    def deployment(request):
+        if request.method == "PATCH":
+            return httpx.Response(200, json={"metadata": {"generation": 2}})
+        return httpx.Response(
+            200,
+            json={
+                "metadata": {"generation": 2},
+                "spec": {"replicas": 1},
+                "status": {"observedGeneration": 1, "replicas": 1, "updatedReplicas": 0},
+            },
+        )
+
+    routes = {"/apis/apps/v1/namespaces/vpp/deployments/ingestion": deployment}
+    async with client(json_router(routes, Recorder())) as http:
+        waited = await kube.restart_deployment(
+            http, "vpp", "ingestion", T0, poll_seconds=0.0, timeout_seconds=0.05
+        )
+    assert not waited.rolled_out
+
+
+async def test_loki_reads_newest_lines_first_and_returns_them_in_time_order():
+    rec = Recorder()
+    body = loki_lines([(1761991260, '{"event":"b"}'), (1761991200, '{"event":"a"}')])
+    async with client(json_router({"/loki/api/v1/query_range": body}, rec)) as http:
+        lines = await loki.query_range(http, '{app="ingestion"}', T0, T1, limit=50)
+    assert rec.requests[0].url.params["direction"] == "backward"
+    assert [ln.line for ln in lines] == ['{"event":"a"}', '{"event":"b"}']
