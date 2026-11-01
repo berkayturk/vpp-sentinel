@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,7 +150,7 @@ class GitWorkspace:
             cwd=self.root.parent,
         )
         for relative in paths:
-            _copy_validated(self.root / relative, clean / relative)
+            _copy_validated(self.root, relative, clean)
         name, email = _split_author(self._author)
         identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
         await _git("checkout", "-q", "-B", branch, cwd=clean)
@@ -253,13 +254,38 @@ def _test_env(root: Path) -> dict[str, str]:
     return {**keep, "HOME": str(home), "UV_CACHE_DIR": str(home / "uv-cache")}
 
 
-def _copy_validated(source: Path, target: Path) -> None:
-    """Mirror one validated path into the clean clone; a missing source is a deletion."""
-    if source.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-    elif target.exists():
-        target.unlink()
+def _copy_validated(root: Path, relative: str, clean: Path) -> None:
+    """Mirror one validated path into the clean clone; a missing source is a deletion.
+
+    A model-written test could have replaced the file, or one of its parent
+    directories, with a symlink to a secret; only regular files reached without
+    following any symlink are copied.
+    """
+    source = root / relative
+    target = clean / relative
+    _refuse_symlinks(root, relative)
+    if not source.exists():
+        if target.is_symlink() or target.exists():
+            target.unlink()
+        return
+    if not stat.S_ISREG(os.lstat(source).st_mode):
+        raise WorkspaceError(f"{relative}: not a regular file")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            target.write_bytes(handle.read())
+    except OSError:
+        os.close(fd)
+        raise
+
+
+def _refuse_symlinks(root: Path, relative: str) -> None:
+    current = root
+    for part in Path(relative).parts:
+        current = current / part
+        if current.is_symlink():
+            raise WorkspaceError(f"{relative}: symlink in path ({current.relative_to(root)})")
 
 
 def _tail(text: str) -> str:

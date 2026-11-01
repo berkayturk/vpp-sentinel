@@ -193,3 +193,33 @@ async def test_repo_config_planted_after_tests_cannot_redirect_the_push(bare: Pa
     )
     assert "agent/untainted" in _git("branch", "--list", "agent/untainted", cwd=bare)
     assert not (tmp_path / "nowhere.git").exists()
+
+
+async def test_symlinks_at_validated_paths_are_refused(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    secret = tmp_path / "token"
+    secret.write_text("sk-ant-very-secret-123456\n")
+    link = ws.root / "services/ingestion/tests/test_fix.py"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(secret)
+    with pytest.raises(WorkspaceError) as info:
+        await ws.commit_and_push(
+            "agent/symlink", "fix: x", paths=("services/ingestion/tests/test_fix.py",)
+        )
+    assert "symlink" in str(info.value)
+    assert _git("branch", "--list", "agent/symlink", cwd=bare).strip() == ""
+
+
+async def test_symlinked_parent_directories_are_refused(bare: Path, tmp_path: Path):
+    ws = _workspace(bare, tmp_path / "ws")
+    await ws.prepare()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leak.py").write_text("x = 1\n")
+    (ws.root / "services/ingestion/tests").mkdir(parents=True, exist_ok=True)
+    (ws.root / "services/ingestion/tests/evil").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(WorkspaceError):
+        await ws.commit_and_push(
+            "agent/symlink-dir", "fix: x", paths=("services/ingestion/tests/evil/leak.py",)
+        )
