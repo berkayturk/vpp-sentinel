@@ -55,3 +55,10 @@ agent:
       memory: 256Mi
     limits:
       memory: 1Gi
+  # The sidecar that runs model-written tests (uv + pytest for the ingestion service).
+  runnerResources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

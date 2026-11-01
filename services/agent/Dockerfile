@@ -19,6 +19,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --create-home app \
+ && useradd --system --uid 10002 --create-home runner \
  && mkdir -p /workspace && chown app:app /workspace
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 # /app stays root-owned: the agent user can read but never change its own code or allowlist.

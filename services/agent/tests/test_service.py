@@ -314,3 +314,11 @@ async def test_model_runs_are_bounded_by_a_wall_clock_timeout(tmp_path: Path):
     outcome = await run_incident(ctx, make_tools(deps), Slow(), store, timeout_seconds=0.1)
     assert outcome.status == "error"
     assert "timed out" in store.rows[0].actions_taken[-1]["outcome"]
+
+
+def test_settings_read_the_test_runner_url(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x")
+    monkeypatch.delenv("TEST_RUNNER_URL", raising=False)
+    assert Settings.from_env().test_runner_url is None
+    monkeypatch.setenv("TEST_RUNNER_URL", "http://127.0.0.1:8002")
+    assert Settings.from_env().test_runner_url == "http://127.0.0.1:8002"

@@ -1,5 +1,6 @@
 """GitWorkspace against a local bare repository: clone, edit, test, push, and no token leaks."""
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -267,6 +268,8 @@ async def test_workspace_hides_code_outside_the_agent_scope(bare: Path, tmp_path
     assert not (ws.root / "docs").exists()
     assert (ws.root / "services/fleet-simulator/pyproject.toml").exists()
     assert (ws.root / "services/ingestion/src/ingestion/schema.py").exists()
+    # Pruning is scaffolding, not a change the model made.
+    assert await ws.changed_paths() == ()
 
 
 async def test_run_tests_kills_the_whole_process_group_on_timeout(bare: Path, tmp_path: Path):
@@ -290,3 +293,48 @@ async def test_run_tests_kills_the_whole_process_group_on_timeout(bare: Path, tm
     assert not result.passed and "timed out" in result.output
     time.sleep(3.5)
     assert not marker.exists()
+
+
+async def test_run_tests_delegates_to_the_runner_when_configured(bare: Path, tmp_path: Path):
+    import httpx
+
+    seen: list[dict] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.read()))
+        return httpx.Response(
+            200, json={"passed": False, "output": "1 failed ghp_abcdefABCDEF123456"}
+        )
+
+    ws = GitWorkspace(
+        repo_url=str(bare),
+        root=tmp_path / "ws",
+        token_provider=lambda: TOKEN,
+        author="Agent Test <agent@example.com>",
+        test_command=("sh", "-c", "echo local-should-not-run; exit 1"),
+        runner=httpx.AsyncClient(transport=httpx.MockTransport(handle), base_url="http://runner"),
+    )
+    await ws.prepare()
+    result = await ws.run_tests()
+    assert seen == [{"root": str((tmp_path / "ws").resolve())}]
+    assert result.passed is False
+    assert "1 failed" in result.output and "ghp_" not in result.output
+    assert "local-should-not-run" not in result.output
+
+
+async def test_runner_errors_become_failed_results(bare: Path, tmp_path: Path):
+    import httpx
+
+    ws = GitWorkspace(
+        repo_url=str(bare),
+        root=tmp_path / "ws",
+        token_provider=lambda: TOKEN,
+        author="Agent Test <agent@example.com>",
+        runner=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(503, text="down")),
+            base_url="http://runner",
+        ),
+    )
+    await ws.prepare()
+    result = await ws.run_tests()
+    assert result.passed is False and "runner" in result.output

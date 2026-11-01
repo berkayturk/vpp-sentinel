@@ -185,13 +185,15 @@ async def test_restart_refused_during_cooldown(setup):
     assert sum(1 for r in setup["recs"]["kube"].requests if r.method == "PATCH") == 1
 
 
-async def test_read_source_file_is_scoped_and_sanitised(setup):
+async def test_read_source_file_is_scoped_and_returns_public_code_verbatim(setup):
     ts = await _toolset(setup)
     assert (await ts.read_source_file(path="services/agent/src/agent/policy.py")).startswith(
         "REFUSED"
     )
+    # Repository code is public; masking fixture ids there would stop the model from
+    # writing a file back unchanged. The write guard still refuses sanitiser markers.
     content = await ts.read_source_file(path="services/ingestion/src/ingestion/schema.py")
-    assert "def parse" in content and "como-charger-012" not in content
+    assert "def parse" in content and "como-charger-012" in content
 
 
 async def test_list_source_files_is_scoped(setup):

@@ -40,6 +40,7 @@ class Settings:
     poll_seconds: float
     http_port: int
     log_level: str
+    test_runner_url: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +69,7 @@ class Settings:
             poll_seconds=float(env.get("POLL_INTERVAL_SECONDS", DEFAULT_POLL_SECONDS)),
             http_port=int(env.get("HTTP_PORT", DEFAULT_HTTP_PORT)),
             log_level=env.get("LOG_LEVEL", "INFO"),
+            test_runner_url=env.get("TEST_RUNNER_URL") or None,
         )
 
 

@@ -46,7 +46,8 @@ with ten purpose-built tools, and always files a report. It may restart the
 one deployment named in `allowlist.yaml`, and for a code-level cause it opens
 a pull request on `agent/<fingerprint>` that it can never merge. Every
 boundary is enforced in the tools and covered by a test; there is no shell or
-kubectl tool. `docs/architecture.md` has the details.
+kubectl tool, and the tests the model writes run in a separate container
+with no secrets. `docs/architecture.md` has the details.
 
 The `incidents` table ships with one seeded historical incident so a first run
 can show the memory lookup; it is marked as seeded in the migration.

@@ -58,6 +58,9 @@ spec:
         prometheus.io/path: /metrics
     spec:
       serviceAccountName: agent
+      # The token is mounted into the agent container only (see volumes); the test runner
+      # never sees it.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -79,6 +82,8 @@ spec:
               value: /tmp/uv-cache
             - name: HTTP_PORT
               value: "8001"
+            - name: TEST_RUNNER_URL
+              value: http://127.0.0.1:8002
             - name: LOG_LEVEL
               value: {{ .Values.agent.logLevel | quote }}
             - name: AGENT_MODEL
@@ -142,13 +147,73 @@ spec:
               mountPath: /workspace
             - name: tmp
               mountPath: /tmp
+            - name: agent-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
+        # Model-written tests run here: another user, no secrets, no token, read-only workspace.
+        - name: test-runner
+          image: {{ .Values.images.agent }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["python", "-m", "agent.runner"]
+          securityContext:
+            runAsUser: 10002
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: WORKSPACE_DIR
+              value: /workspace
+            - name: TEST_RUNNER_PORT
+              value: "8002"
+            - name: HOME
+              value: /tmp/home
+            - name: UV_CACHE_DIR
+              value: /tmp/uv-cache
+            - name: UV_PROJECT_ENVIRONMENT
+              value: /tmp/venv
+            - name: LOG_LEVEL
+              value: {{ .Values.agent.logLevel | quote }}
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/healthz')"
+            periodSeconds: 10
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+              readOnly: true
+            - name: runner-tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.agent.runnerResources | nindent 12 }}
       volumes:
         - name: workspace
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        - name: runner-tmp
+          emptyDir: {}
+        - name: agent-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
 ---
 # The agent's only write to the cluster is a rollout restart. RBAC limits it to this deployment;
 # this policy limits the patch itself: everything but the restart annotation must stay equal.

@@ -282,24 +282,32 @@ measured run on Opus: the firmware-drift incident, from alert to an open pull
 request, took two minutes, 20 tool calls and about 350 k input / 12 k output
 tokens.
 
+### Where model-written tests run
+
+Tier 3 means the model writes tests and the platform runs them. They never
+run next to the agent's secrets: the pod has a second container,
+`test-runner`, with its own user (10002), no environment secrets, no
+service-account token (the token is projected into the agent container
+only), a read-only mount of the shared workspace and its own `/tmp`. It
+listens on the pod's loopback and does one thing: run the fixed test
+command in a directory under `/workspace`. The agent asks it over
+`TEST_RUNNER_URL`; without that variable (local development) tests run in
+process. Test runs get their own process group and are killed on timeout.
+
 ### Known limitations (read before trusting the boundaries)
 
-- **Model-written tests run inside the agent pod**, as the same user as the
-  agent. They get a bare environment and their own process group (killed on
-  timeout), cannot change build files, and the commit is made from a second
-  clone they never ran in — but a test process can still read the agent's
-  environment through `/proc`, and so reach the API key and the GitHub
-  token. The honest fix is a separate test-runner container or job with no
-  secrets and no service account; until then, treat the GitHub token as
-  exposed to whatever the model writes, and scope it to this repository
-  only.
+- **The runner has network egress.** `uv` needs PyPI to build the ingestion
+  environment, and kind's default network plugin does not enforce
+  `NetworkPolicy`, so a model-written test could reach the internet. It
+  reaches nothing inside the pod: no token, no secrets, no write access to
+  the workspace.
 - **The service-account token can patch one deployment.** Role RBAC limits
-  it to `deployments/ingestion`, and a `ValidatingAdmissionPolicy` in the
-  chart rejects any change to that deployment other than the restart
-  annotation (image, command, volumes and replicas must stay equal).
+  it to `deployments/ingestion`, and a `ValidatingAdmissionPolicy` rejects
+  any change to that deployment other than the restart annotation (pod
+  spec, replicas, strategy, labels and the deployment's own metadata must
+  stay equal).
 - **`CODEOWNERS` blocks nothing by itself.** Turn on branch protection for
   `main` with *Require review from Code Owners* so the paths it lists really
   need the author's approval; the PR tool's path guard is the first line.
-- **Secrets on the push command line.** The token is passed in the push URL
-  of a short-lived `git` process; a concurrent process of the same user could
-  read it. The runner-container design above removes this too.
+- **The push token is on a git command line** inside the agent container
+  for the few seconds of the push; nothing else runs in that container.

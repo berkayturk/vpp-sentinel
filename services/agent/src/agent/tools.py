@@ -192,7 +192,9 @@ class ToolSet:
             return self._done("read_source_file", {"path": path}, f"REFUSED: {exc}")
         except WorkspaceError as exc:
             return self._done("read_source_file", {"path": path}, f"ERROR: {exc}")
-        return self._done("read_source_file", {"path": path}, content)
+        # Public repository code is returned verbatim (see _done_raw): masking fixture ids in
+        # it would stop the model from writing a file back unchanged.
+        return self._done_raw("read_source_file", {"path": path}, content)
 
     # --- action tools (Tier 2) ---------------------------------------------------
 
@@ -413,6 +415,19 @@ class ToolSet:
     def _public_text(self, text: str) -> str:
         """Anything that leaves for GitHub: no attribution lines, no identifiers, no secrets."""
         return sanitize_text(_strip_attribution(text), self.deps.salt).strip()
+
+    def _done_raw(self, tool: str, args: dict[str, Any], outcome: str) -> str:
+        """Record a call whose result is public source code, which is not sanitised."""
+        self.log = (*self.log, ToolCall(tool, args, _short(outcome), self.deps.now()))
+        log.info(
+            "incident.tool_call",
+            incident_id=self.deps.incident.id,
+            tool=tool,
+            args=args,
+            outcome_class="ok",
+            outcome=f"{len(outcome)} characters",
+        )
+        return outcome
 
     def _done(self, tool: str, args: dict[str, Any], outcome: str) -> str:
         clean = sanitize_text(outcome, self.deps.salt)

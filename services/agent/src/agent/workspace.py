@@ -17,17 +17,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import httpx
+
 from agent.sanitize import sanitize_text
 
+# Frozen lock, no coverage, no cache files: the workspace may be mounted read-only in the runner.
 DEFAULT_TEST_COMMAND = (
     "uv",
     "run",
+    "--frozen",
     "--directory",
     "services/ingestion",
     "pytest",
     "-q",
     "-x",
     "--no-cov",
+    "-p",
+    "no:cacheprovider",
 )
 DEFAULT_PUSH_URL = "https://x-access-token:{token}@github.com/{repo}.git"
 TEST_TIMEOUT_SECONDS = 180
@@ -70,8 +76,10 @@ class GitWorkspace:
         push_url: str = DEFAULT_PUSH_URL,
         repo: str = "",
         test_timeout_seconds: float = TEST_TIMEOUT_SECONDS,
+        runner: httpx.AsyncClient | None = None,
     ) -> None:
         self._test_timeout = test_timeout_seconds
+        self._runner = runner
         self.repo_url = repo_url
         self.root = root
         self._token_provider = token_provider
@@ -117,10 +125,14 @@ class GitWorkspace:
         out = await _git(
             "status", "--porcelain=v1", "-z", "--untracked-files=all", cwd=self.root, raw=True
         )
-        return tuple(sorted(_parse_status(out)))
+        # Files removed by _prune_outside_scope are scaffolding, not changes the model made,
+        # and they lie outside the scope the path guard allows anyway.
+        return tuple(sorted(p for p in _parse_status(out) if not _pruned(p)))
 
     async def run_tests(self) -> TestResult:
-        """Run the test command in its own process group with a minimal environment."""
+        """Run the test command: in the runner sidecar when one is configured, else locally."""
+        if self._runner is not None:
+            return await self._run_tests_remotely()
         try:
             output = await _run(
                 list(self._test_command),
@@ -132,6 +144,20 @@ class GitWorkspace:
         except WorkspaceError as exc:
             return TestResult(False, str(exc))
         return TestResult(True, _tail(output))
+
+    async def _run_tests_remotely(self) -> TestResult:
+        """Ask the sidecar (another user, no secrets, read-only workspace) to run the tests."""
+        assert self._runner is not None
+        try:
+            response = await self._runner.post(
+                "/run", json={"root": str(self.root.resolve())}, timeout=self._test_timeout + 30
+            )
+            response.raise_for_status()
+            body = response.json()
+            passed, output = bool(body["passed"]), str(body["output"])
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            return TestResult(False, sanitize_text(f"test runner unavailable: {exc}"))
+        return TestResult(passed, _tail(sanitize_text(output)))
 
     async def commit_and_push(self, branch: str, message: str, paths: Sequence[str] = ()) -> str:
         """Stage exactly ``paths`` (already validated by the caller), commit and push.
@@ -262,6 +288,10 @@ STUB_PACKAGES = (
     "services/fleet-simulator/src/fleet_simulator",
     "services/agent/src/agent",
 )
+
+
+def _pruned(relative: str) -> bool:
+    return any(relative == p or relative.startswith(p + "/") for p in OUT_OF_SCOPE)
 
 
 def _prune_outside_scope(root: Path) -> None:

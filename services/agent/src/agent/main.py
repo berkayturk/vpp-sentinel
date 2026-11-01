@@ -73,6 +73,12 @@ def _deps(settings: Settings, store: PostgresIncidentStore) -> ServiceDeps:
 
     policy = load_allowlist(settings.allowlist_path)
 
+    runner = (
+        httpx.AsyncClient(base_url=settings.test_runner_url, timeout=300.0)
+        if settings.test_runner_url
+        else None
+    )
+
     def workspace(slug: str) -> GitWorkspace:
         return GitWorkspace(
             repo_url=settings.repo_url,
@@ -80,6 +86,7 @@ def _deps(settings: Settings, store: PostgresIncidentStore) -> ServiceDeps:
             token_provider=lambda: settings.github_token,
             author=settings.git_author,
             repo=settings.repo,
+            runner=runner,
         )
 
     def guard(root: Path) -> PathGuard:
@@ -128,6 +135,7 @@ async def _worker(settings: Settings, readiness: _Readiness) -> None:
             effort=settings.effort,
             repo=settings.repo,
             pull_requests=bool(settings.github_token),
+            test_runner=settings.test_runner_url or "in-process",
         )
         await run_forever(_deps(settings, store), settings.poll_seconds, readiness.mark_ready)
     finally:
