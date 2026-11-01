@@ -19,7 +19,7 @@ sleep 3
 
 # Facts only the cluster knows, handed to the driver as plain values (never the secret itself).
 SECRET_KEYS=$(kubectl -n "$NAMESPACE" get secret agent-credentials -o json 2>/dev/null \
-  | python3 -c 'import json,sys; print(",".join(sorted(json.load(sys.stdin).get("data", {}).keys())))' || true)
+  | python3 -c 'import base64,json,sys; d=json.load(sys.stdin).get("data", {}); print(",".join(sorted(k for k,v in d.items() if base64.b64decode(v).strip())))' || true)
 AGENT_READY=$(kubectl -n "$NAMESPACE" logs deploy/agent -c agent --tail=200 2>/dev/null \
   | grep -c '"event": "agent.ready"' || true)
 AGENT_MODEL=$(kubectl -n "$NAMESPACE" get deploy agent -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AGENT_MODEL")].value}')

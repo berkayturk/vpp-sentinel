@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from agent.capture import (
@@ -147,13 +148,15 @@ def _deps(
     agent_ready: bool = True,
     alert_never_fires: bool = False,
     timeout_seconds: float = 0.05,
+    alertmanager_client: httpx.AsyncClient | None = None,
+    prometheus_client: httpx.AsyncClient | None = None,
 ) -> CaptureDeps:
     faults = FakeFaults()
-    am = client(json_router({"/api/v2/alerts": active_alerts or []}, Recorder()))
-    prom_answers = (
-        {} if alert_never_fires else {"ALERTS_FOR_STATE": [({"alertname": "x"}, T.timestamp())]}
+    # With no active alert the fake Alertmanager never reports firing (alert_never_fires).
+    am = alertmanager_client or client(
+        json_router({"/api/v2/alerts": active_alerts or []}, Recorder())
     )
-    prom = client(prometheus_router(prom_answers, Recorder()))
+    prom = prometheus_client or client(prometheus_router({}, Recorder()))
     return CaptureDeps(
         faults=faults,
         alertmanager=am,
@@ -216,3 +219,109 @@ def test_observations_are_immutable():
     with pytest.raises((AttributeError, TypeError)):
         obs.tool_calls = 1  # type: ignore[misc]
     assert replace(obs, tool_calls=1).tool_calls == 1
+
+
+async def test_protocol_happy_path_records_every_timestamp():
+    """A fault makes its alert fire and the agent act at once; the store resolves the surge
+    incident after the report has been seen twice. The observations must carry the alert's
+    startsAt, the action and report times and the resolution."""
+    from datetime import timedelta
+
+    class SelfResolvingStore(FakeIncidentStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.seen: dict[int, int] = {}
+
+        async def list_open(self):
+            for row in await super().list_open():
+                if any(a.get("tool") == "file_report" for a in row.actions_taken):
+                    self.seen[row.id] = self.seen.get(row.id, 0) + 1
+                    if self.seen[row.id] >= 2 and row.alert_name == "VppIngestionLagHigh":
+                        await self.resolve(row.id, "resolved")
+            return await super().list_open()
+
+    store = SelfResolvingStore()
+    state: dict = {"active": []}
+
+    def alerts(request):
+        live = [
+            a
+            for a in state["active"]
+            if any(
+                r.alert_name == a["labels"]["alertname"] and r.resolved_at is None
+                for r in store.rows
+            )
+        ]
+        return httpx.Response(200, json=live)
+
+    def alert(name, labels, started):
+        return {
+            "labels": {"alertname": name, **labels},
+            "annotations": {},
+            "startsAt": started.isoformat(),
+            "status": {"state": "active"},
+        }
+
+    async def act(name: str, labels: dict, started, tool: str, action_at, report_at):
+        state["active"].append(alert(name, labels, started))
+        inc = await store.open(
+            Alert(
+                name=name, labels={"alertname": name, **labels}, annotations={}, starts_at=started
+            )
+        )
+        await store.record_action(
+            inc.id, {"tool": tool, "args": {}, "outcome": "ok", "at": action_at.isoformat()}
+        )
+        await store.record_action(
+            inc.id,
+            {"tool": "file_report", "args": {}, "outcome": "ok", "at": report_at.isoformat()},
+        )
+        await store.save_report(inc.id, "# Incident report\n\n## Summary\nx")
+
+    class ScriptedFaults(FakeFaults):
+        async def post(self, name, body):
+            await super().post(name, body)
+            if name == "load-surge":
+                await act(
+                    "VppIngestionLagHigh",
+                    {"severity": "warning"},
+                    T + timedelta(seconds=100),
+                    "restart_deployment",
+                    T + timedelta(seconds=160),
+                    T + timedelta(seconds=200),
+                )
+            else:
+                await act(
+                    "VppSiteDevicesDark",
+                    {"site": "como", "device_type": "charger"},
+                    T + timedelta(seconds=700),
+                    "open_pull_request",
+                    T + timedelta(seconds=800),
+                    T + timedelta(seconds=830),
+                )
+
+    prom = client(
+        prometheus_router(
+            {"tokens": [({"kind": "input"}, 1000.0)], "tool_calls": [({"outcome": "ok"}, 7.0)]},
+            Recorder(),
+        )
+    )
+    deps = replace(
+        _deps(
+            store=store,
+            alertmanager_client=client(httpx.MockTransport(alerts)),
+            prometheus_client=prom,
+            timeout_seconds=2.0,
+        ),
+        faults=ScriptedFaults(),
+    )
+    obs = await run_protocol(deps)
+    assert obs.surge.alert_active_at == T + timedelta(seconds=100)
+    assert obs.surge.action_at == T + timedelta(seconds=160)
+    assert obs.surge.report_at == T + timedelta(seconds=200)
+    assert obs.surge.resolved_at is not None
+    assert obs.drift.alert_active_at == T + timedelta(seconds=700)
+    assert obs.drift.action_at == T + timedelta(seconds=800)
+    assert obs.drift.incident is not None and obs.drift.incident.report_md.startswith("# Incident")
+    assert deps.faults.calls[-1] == ("DELETE", "/faults")
+    assert compute_kpis(obs).rows["firmware-drift"].pull_request_s == 100

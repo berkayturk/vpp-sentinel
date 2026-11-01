@@ -20,30 +20,37 @@ the platform-health role asks for.
    context — timing, blast radius ("12 of 30 chargers at como"), severity,
    whether this was seen before, the warning logs and the runbook — then
    queries Prometheus and Loki, reads the ingestion code, writes a failing
-   regression test, fixes the parser, and runs the suite in a separate
+   regression test, fixes the code, and runs the suite in a separate
    container that holds no secrets.
-3. **It opens a pull request it cannot merge.** 138 s after the
-   alert, the fix and the incident report are on GitHub for a human to
-   review: [pull request #1](https://github.com/berkayturk/vpp-sentinel/pull/1).
+3. **It opens a pull request it cannot merge.** 138 s after the alert the
+   fix is on GitHub, and the incident report follows on the same pull
+   request at 171 s, for a human to review:
+   [pull request #1](https://github.com/berkayturk/vpp-sentinel/pull/1) —
+   opened by an earlier rehearsal and updated in place by the measured run,
+   because the same incident fingerprint always lands on the same branch.
    The other scenario — a telemetry surge that the single consumer cannot
    absorb — ends with the one action the allowlist permits, a rollout
    restart, 73 s after the alert, and a report that says
    plainly it is a mitigation, not a fix.
 
-![Fleet health dashboard during the firmware-drift incident](docs/images/fleet-health.png)
+![Fleet health dashboard across both incidents: the surge's freshness spike, then como at 48 of 60 and rejects by firmware](docs/images/fleet-health.png)
+
+*The brief 100 % spike on "dark fraction" is the reporting gauges resetting while
+ingestion restarts; the alert's two-minute hold is there so it never fires on that.*
 
 ## Measured
 
-Numbers from one scripted run on a fresh cluster (`make capture`); the full
-table and the protocol are in [docs/kpis.md](docs/kpis.md).
+Numbers from one protocol run on a fresh cluster (`make capture`, with the
+sources of each cell stated in [docs/kpis.md](docs/kpis.md)).
 
 | KPI | Load surge (restart) | Firmware drift (pull request) |
 |---|---|---|
 | Detection: fault injected → alert firing | 172 s | 195 s |
 | Action: alert firing → allowlisted restart | 73 s | — |
-| Pull request: alert firing → PR opened | — | 138 s |
+| Pull request: alert firing → PR opened or updated | — | 138 s |
 | Report filed after the alert | 124 s | 171 s |
 | Resolution: alert firing → alert resolved | 150 s | — |
+| Alerts fired → actions taken | 2 / 2 | |
 | Model cost for both incidents | 2.80 USD (588 k input / 22 k output tokens, no caching) | |
 
 The agent's own report for the firmware-drift incident is in
@@ -74,12 +81,14 @@ lists what every tool refuses and what the remaining limitations are.
 
 ```
  fleet-simulator ──MQTT──▶ mosquitto ──▶ ingestion ──asyncpg──▶ postgresql
- 300 devices, 5 sites        │              │ parse→store→metrics→log   telemetry, incidents
- fault switches              │              ▼
-                             │         Prometheus ◀── Alertmanager ◀── 2 alerts, 2 runbooks
-                             │         Loki ◀── Alloy          │
-                             ▼                                 ▼
-                         Grafana (2 dashboards)           incident agent ── GitHub PR
+ 300 devices, 5 sites                        │  parse → store → metrics → log   telemetry, incidents
+ fault switches                              │                                      ▲
+                                 metrics ────┤                                      │ reports, memory
+                                             ▼                                      │
+   Alloy ──logs──▶ Loki      Prometheus ──2 alerts──▶ Alertmanager ──polled──▶ incident agent ──▶ GitHub PR
+                    └──────────────┬──────────────────────┘                        │ allowlisted restart
+                                   ▼                                                ▼
+                         Grafana (2 dashboards)                              ingestion (rollout)
 ```
 
 - **Platform** — a Python fleet simulator with domain-correct physics and two
@@ -100,7 +109,8 @@ lists what every tool refuses and what the remaining limitations are.
 - [uv](https://docs.astral.sh/uv/) (Python 3.12 is installed by uv on demand)
 - For the incident agent (optional — without it the platform and dashboards still run):
   - `ANTHROPIC_API_KEY` in your environment (an Anthropic API key; one incident run
-    costs roughly 1–3 USD on Claude Opus)
+    costs roughly 1–2 USD on Claude Opus; the measured two-incident protocol
+    cost 2.80 USD)
   - `GITHUB_TOKEN`: a fine-grained personal access token for the repository the
     agent should open pull requests on, with *Contents: write* and
     *Pull requests: write*; set `agent.repo` in `deploy/chart/values.yaml` to your
@@ -120,7 +130,7 @@ written to the repository.
 | `make incident-load-surge` | One site publishes telemetry 50× faster for 180 s |
 | `make incident-firmware-drift` | 40 % of one site's chargers switch to a newer firmware revision |
 | `make incident-clear` | Switches every fault off |
-| `make capture` | Runs both scenarios in order and writes `docs/kpis.md` and `docs/sample-report.md` (needs the agent credentials; about 4–6 USD on Opus) |
+| `make capture` | Runs both scenarios in order and writes `docs/kpis.md` and `docs/sample-report.md` (needs the agent credentials; 2.80 USD on Opus in the measured run) |
 | `make down` | Deletes the kind cluster |
 
 Developer loop: `make test`, `make lint`, `make alerts-test` (alert rules are
@@ -141,17 +151,17 @@ pull request does.
    seconds and the pager path is the real one.
 3. A replay mode that re-plays a recorded agent run without an API key, so a
    reader can watch the whole story for free.
-4. Prompt caching on the agent's requests — a run today sends about 350 k
-   input tokens, most of them the same system prompt and context.
+4. Prompt caching on the agent's requests — the two measured incidents sent
+   about 590 k input tokens, most of them the same system prompt and context.
 5. "Promotion": when the agent has proposed the same action several times and
    a human approved it each time with a good outcome, propose adding it to the
    allowlist through a pull request.
 
 ## What I don't know yet
 
-I have run Kubernetes clusters that I built and that CKA/CKAD prepared me
-for, not a production fleet platform with thousands of real devices and the
-operational history that comes with it. The simulator here is honest about
+I hold CKA and CKAD and have run clusters I built myself, not a production
+fleet platform with thousands of real devices and the operational history
+that comes with it. The simulator here is honest about
 physics but not about the ways real firmware, networks and customers fail.
 I do not yet know how this agent behaves on an alert it has never seen, or
 what its cost looks like at fleet scale with hundreds of incidents a month;

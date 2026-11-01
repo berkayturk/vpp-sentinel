@@ -110,6 +110,7 @@ class CaptureDeps:
     poll_seconds: float = 5.0
     scenario_timeout_seconds: float = 20 * 60
     quiet_seconds: float = 120.0
+    scrape_settle_seconds: float = 30.0
 
 
 # --- pure ------------------------------------------------------------------------
@@ -172,7 +173,8 @@ def render_kpis_md(table: KpiTable, protocol: ProtocolInfo) -> str:
         f" agent image `{protocol.agent_image}`. Timestamps come from Alertmanager (the moment"
         " an alert began firing, stored on the incident), the `incidents` table (actions,"
         " reports, resolution) and the capture script's own clock (fault injection, incident"
-        f" opening — polled every {POLL_PRECISION_SECONDS} s, so ±{POLL_PRECISION_SECONDS} s)."
+        f" opening — polled every {POLL_PRECISION_SECONDS} s, so ±{POLL_PRECISION_SECONDS} s);"
+        " tokens and tool calls are deltas of the agent's Prometheus counters."
     )
     rows = [
         ("Detection: fault injected → alert firing", surge.detection_s, drift.detection_s),
@@ -265,6 +267,8 @@ async def run_protocol(deps: CaptureDeps) -> Observations:
         )
     finally:
         await deps.faults.clear()
+    # Let Prometheus scrape the agent's final counters before the after-snapshot.
+    await asyncio.sleep(deps.scrape_settle_seconds)
     tokens_after = await _counters(deps, "vpp_agent_model_tokens_total", "kind")
     calls_after = await _counters(deps, "vpp_agent_tool_calls_total", "outcome")
     calls = {k: calls_after.get(k, 0) - calls_before.get(k, 0) for k in calls_after}
@@ -283,8 +287,8 @@ async def _scenario(
     deps: CaptureDeps, fault: tuple[str, dict], alert: str, fp: str, action_tool: str, resolve: bool
 ) -> ScenarioObs:
     name, body = fault
-    injected_at = deps.now()
     await deps.faults.post(name, body)
+    injected_at = deps.now()  # the switch returns once the fault is applied
     await _wait(deps, lambda: _alert_firing(deps, alert), f"{alert} firing")
     opened = await _wait(deps, lambda: deps.store.find_open(fp), f"incident for {alert}")
     opened_at = deps.now()
