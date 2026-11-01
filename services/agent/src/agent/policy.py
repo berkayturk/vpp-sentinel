@@ -110,7 +110,12 @@ class PathGuard:
         for prefix in self.forbidden:
             if relative == prefix.rstrip("/") or relative.startswith(prefix):
                 return Decision(False, f"{relative}: forbidden path ({prefix})")
-        if not any(relative.startswith(prefix) for prefix in self.allowed):
+        if not any(_within(relative, prefix) for prefix in self.allowed):
             scope = ", ".join(self.allowed)
             return Decision(False, f"{relative}: outside the agent's scope ({scope})")
         return Decision(True)
+
+
+def _within(relative: str, prefix: str) -> bool:
+    """``services/ingestion`` and anything below ``services/ingestion/`` are inside the scope."""
+    return relative == prefix.rstrip("/") or relative.startswith(prefix)

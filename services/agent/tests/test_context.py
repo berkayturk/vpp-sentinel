@@ -203,3 +203,29 @@ async def test_metrics_snapshot_names_each_query(runbooks: Path):
     assert expected <= names
     rejects = next(m for m in ctx.metrics if m.name == "rejects_by_reason_firmware")
     assert rejects.now[0].labels["firmware"] == "2.4.0"
+
+
+async def test_repeated_log_lines_are_grouped_with_counts(runbooks: Path):
+    repeated = [
+        (
+            1761991600 + i,
+            json_line(
+                event="telemetry.rejected",
+                reason="invalid_timestamp",
+                firmware="2.4.0",
+                topic=f"vpp/como/charger/como-charger-{i:03d}/telemetry",
+                level="warning",
+            ),
+        )
+        for i in range(40)
+    ] + [(1761991700, DISCONNECTED)]
+    store = FakeIncidentStore()
+    prom = client(prometheus_router(GAUGES, Recorder(), before=HEALTHY, cutoff=STARTED.timestamp()))
+    lk = client(json_router({"/loki/api/v1/query_range": loki_lines(repeated)}, Recorder()))
+    deps = ContextDeps(prometheus=prom, loki=lk, store=store, runbooks_dir=runbooks, salt=SALT)
+    ctx = await build_context(DARK, deps, NOW)
+    assert len(ctx.logs) <= 6
+    joined = "\n".join(ctx.logs)
+    assert "40 similar lines" in joined and "telemetry.rejected" in joined
+    assert "mqtt.disconnected" in joined
+    assert "como-charger-0" not in joined

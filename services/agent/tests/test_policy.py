@@ -108,3 +108,10 @@ def test_repo_allowlist_forbids_build_and_config_files_in_scope(build_file: str)
     guard = PathGuard(Path("/repo"), allowed=a.allowed_paths, forbidden=a.forbidden_paths)
     assert not guard.check_diff([build_file]).allowed
     assert guard.check_diff(["services/ingestion/src/ingestion/schema.py"]).allowed
+
+
+def test_path_guard_accepts_the_scope_directory_itself(guard: PathGuard, tmp_path: Path):
+    assert guard.resolve("services/ingestion") == (tmp_path / "services/ingestion").resolve()
+    assert guard.resolve("services/ingestion/") == (tmp_path / "services/ingestion").resolve()
+    with pytest.raises(PathRefused):
+        guard.resolve("services/ingestionX")

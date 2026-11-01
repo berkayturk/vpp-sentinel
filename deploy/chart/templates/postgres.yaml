@@ -36,6 +36,10 @@ spec:
         - name: postgres
           image: {{ .Values.images.postgres }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          # Demo tuning for an emptyDir on a laptop: asynchronous commits and a larger buffer
+          # cache keep insert latency flat as the telemetry table grows over a long session.
+          # A production database would not run with synchronous_commit off.
+          args: ["-c", "synchronous_commit=off", "-c", "shared_buffers=256MB"]
           envFrom:
             - secretRef:
                 name: postgres-credentials

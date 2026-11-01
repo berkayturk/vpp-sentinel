@@ -8,6 +8,7 @@ the alert is about.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -140,7 +141,37 @@ async def _logs(deps: ContextDeps, timing: Timing) -> tuple[str, ...]:
         )
     except ClientError as exc:
         return (f"(logs unavailable: {sanitize_text(str(exc), deps.salt)})",)
-    return tuple(sanitize_text(ln.line, deps.salt) for ln in lines)
+    return _group_lines(tuple(sanitize_text(ln.line, deps.salt) for ln in lines))
+
+
+def _group_lines(lines: tuple[str, ...], samples_per_group: int = 2) -> tuple[str, ...]:
+    """Collapse near-identical JSON lines: two samples and a count per event/reason/firmware."""
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    for line in lines:
+        key = _group_key(line)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(line)
+    out: list[str] = []
+    for key in order:
+        members = groups[key]
+        out.extend(members[:samples_per_group])
+        if len(members) > samples_per_group:
+            out.append(f"({len(members)} similar lines: {key})")
+    return tuple(out)
+
+
+def _group_key(line: str) -> str:
+    try:
+        data = json.loads(line)
+    except ValueError:
+        return line[:80]
+    if not isinstance(data, dict) or "event" not in data:
+        return line[:80]
+    parts = [str(data.get(k)) for k in ("event", "reason", "firmware", "level") if data.get(k)]
+    return " ".join(parts)
 
 
 def _runbook(directory: Path, alert_name: str) -> str:

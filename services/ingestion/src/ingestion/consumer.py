@@ -35,6 +35,8 @@ GAUGE_REFRESH_SECONDS = 15.0
 RECONNECT_INITIAL_SECONDS = 1.0
 RECONNECT_MAX_SECONDS = 30.0
 UNKNOWN_GROUP = (UNKNOWN_LABEL, UNKNOWN_LABEL)
+# Enough of a rejected payload to see its shape in a log line, never the whole message.
+PAYLOAD_SAMPLE_BYTES = 240
 
 
 def _site_from_topic(topic: str, fleet: FleetIndex) -> str | None:
@@ -69,7 +71,12 @@ async def handle_message(
     if isinstance(parsed, ParseError):
         record_rejected(parsed, _site_from_topic(topic, fleet))
         log.warning(
-            "telemetry.rejected", topic=topic, reason=parsed.reason, firmware=parsed.firmware
+            "telemetry.rejected",
+            topic=topic,
+            reason=parsed.reason,
+            firmware=parsed.firmware,
+            detail=parsed.detail,
+            payload_sample=raw[:PAYLOAD_SAMPLE_BYTES].decode(errors="replace"),
         )
         return reg
     group = fleet.group_of(parsed.device_id)

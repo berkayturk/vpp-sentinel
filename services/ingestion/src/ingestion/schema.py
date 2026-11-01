@@ -5,7 +5,7 @@ whose ``reason`` is one of a small, bounded set so it can be a metric label.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -52,6 +52,8 @@ class ParseError:
     reason: Reason
     device_type: str | None
     firmware: str | None
+    # The first validation message, for logs; not part of equality so callers can compare reasons.
+    detail: str = field(default="", compare=False)
 
 
 def _str_or_none(data: dict[str, Any], key: str) -> str | None:
@@ -59,14 +61,21 @@ def _str_or_none(data: dict[str, Any], key: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _detail(error: ValidationError) -> str:
+    first = error.errors()[0] if error.errors() else {}
+    loc = ".".join(str(part) for part in first.get("loc", ())) or "payload"
+    value = first.get("input")
+    return f"{loc}: {first.get('msg', 'invalid')} (input_type={type(value).__name__})"[:200]
+
+
 def _classify(error: ValidationError, data: dict[str, Any]) -> ParseError:
     first = error.errors()[0]
     device_type, firmware = _str_or_none(data, "device_type"), _str_or_none(data, "firmware")
     if first["type"] == "missing":
-        return ParseError("missing_field", device_type, firmware)
+        return ParseError("missing_field", device_type, firmware, _detail(error))
     if first["loc"] and first["loc"][0] == "ts":
-        return ParseError("invalid_timestamp", device_type, firmware)
-    return ParseError("invalid_value", device_type, firmware)
+        return ParseError("invalid_timestamp", device_type, firmware, _detail(error))
+    return ParseError("invalid_value", device_type, firmware, _detail(error))
 
 
 def parse_telemetry(raw: bytes) -> Telemetry | ParseError:

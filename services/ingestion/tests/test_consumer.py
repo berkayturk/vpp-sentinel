@@ -130,3 +130,30 @@ def test_refresh_gauges_uses_the_cached_index_not_the_database():
     assert _sample("vpp_devices_reporting", {"site": "como", "device_type": "charger"}) == 1
     assert _sample("vpp_devices_reporting", {"site": "como", "device_type": "battery"}) == 0
     assert _sample("vpp_devices_expected", {"site": "como", "device_type": "charger"}) == 30
+
+
+async def test_rejected_messages_log_a_payload_sample_and_the_validation_detail():
+    import structlog
+
+    from ingestion.consumer import handle_message
+    from ingestion.registry import LastSeen
+
+    raw = (
+        b'{"device_id":"como-charger-001","site":"como","device_type":"charger",'
+        b'"ts":1793455500000,"firmware":"2.4.0","status":"charging",'
+        b'"power_kw":7.4,"energy_kwh":12.5,"soc_pct":null,"voltage_v":231.2}'
+    )
+    with structlog.testing.capture_logs() as logs:
+        await handle_message(
+            raw,
+            "vpp/como/charger/como-charger-001/telemetry",
+            FakeStore(),
+            LastSeen({}),
+            NOW,
+            FLEET,
+        )
+    rejected = [e for e in logs if e["event"] == "telemetry.rejected"][0]
+    assert rejected["reason"] == "invalid_timestamp"
+    assert '"ts":1793455500000' in rejected["payload_sample"]
+    assert "ts" in rejected["detail"]
+    assert len(rejected["payload_sample"]) <= 300
