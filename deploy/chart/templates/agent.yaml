@@ -167,13 +167,39 @@ spec:
   matchConditions:
     - name: only-the-agent
       expression: "request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:agent'"
+  variables:
+    - name: restartKey
+      expression: "'kubectl.kubernetes.io/restartedAt'"
+    - name: newAnnotations
+      expression: "object.spec.template.metadata.?annotations.orValue({})"
+    - name: oldAnnotations
+      expression: "oldObject.spec.template.metadata.?annotations.orValue({})"
   validations:
     - expression: "object.spec.template.spec == oldObject.spec.template.spec"
       message: "the agent may only restart a deployment, not change its pod spec"
-    - expression: "object.spec.replicas == oldObject.spec.replicas && object.spec.selector == oldObject.spec.selector"
-      message: "the agent may not scale or reselect a deployment"
-    - expression: "object.spec.template.metadata.labels == oldObject.spec.template.metadata.labels"
+    - expression: >-
+        object.spec.replicas == oldObject.spec.replicas
+        && object.spec.selector == oldObject.spec.selector
+        && object.spec.?paused == oldObject.spec.?paused
+        && object.spec.?strategy == oldObject.spec.?strategy
+        && object.spec.?minReadySeconds == oldObject.spec.?minReadySeconds
+        && object.spec.?progressDeadlineSeconds == oldObject.spec.?progressDeadlineSeconds
+        && object.spec.?revisionHistoryLimit == oldObject.spec.?revisionHistoryLimit
+      message: "the agent may not scale, pause, reselect or change the rollout of a deployment"
+    - expression: >-
+        object.metadata.?labels == oldObject.metadata.?labels
+        && object.metadata.?annotations == oldObject.metadata.?annotations
+        && object.metadata.?finalizers == oldObject.metadata.?finalizers
+        && object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences
+      message: "the agent may not change a deployment's own metadata"
+    - expression: "object.spec.template.metadata.?labels == oldObject.spec.template.metadata.?labels"
       message: "the agent may not relabel pods"
+    - expression: >-
+        variables.newAnnotations.filter(k, k != variables.restartKey)
+          .all(k, k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k])
+        && variables.oldAnnotations.filter(k, k != variables.restartKey)
+          .all(k, k in variables.newAnnotations)
+      message: "the agent may only set the restart annotation on pods"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
