@@ -202,3 +202,91 @@ fleet-level check that a later layer may add.
 `make grafana`, `make prometheus`, `make alertmanager` (port-forwards),
 `make alerts` (active alerts), `make alerts-test` (promtool), `make
 dashboards-check` (dashboard JSON validation).
+
+## Incident agent
+
+`services/agent`, Python 3.12, the official Anthropic SDK with custom tools
+only. It runs as one pod in the `vpp` namespace and idles (logging
+`agent.disabled`) when no `ANTHROPIC_API_KEY` is present, so the platform and
+the dashboards work without it.
+
+### Trigger and lifecycle
+
+Every 15 s the agent reads Alertmanager's active alerts. Each alert maps to a
+fingerprint `alertname|site|device_type`; a firing alert with no open
+incident for that fingerprint opens one row in the `incidents` table and runs
+the agent once. When the alert stops firing, the incident is resolved with an
+outcome that records whether a restart within the previous five minutes was
+the mitigation. The same alert never runs the agent twice while its incident
+is open.
+
+### What the agent receives (read-only, built in code)
+
+Before the model sees anything, the agent assembles a context packet from
+fixed queries: **timing** (alert start, a ten-minute window before it),
+**blast radius** computed from the reporting/expected gauges (which site and
+device groups, how many devices) and the site whose stored rate rose most,
+**severity** from the alert label, **incident memory** (earlier incidents
+with the same alert name and how they ended), the **runbook** for the alert,
+a snapshot of the key metrics at the window start and now, and the warning
+and error **log lines** of the window — grouped when repetitive and passed
+through the sanitiser. Device identifiers become stable pseudonyms that keep
+site and type (`como-charger-#a1b2c3`), IP addresses and credential-shaped
+tokens are masked. Every tool result passes through the same sanitiser.
+
+### The tools, and what each one refuses
+
+| Tool | Does | Refuses |
+|---|---|---|
+| `query_prometheus` | instant query now and N minutes ago | — |
+| `query_logs` | Loki lines for the last N minutes (newest first, max 200) | — |
+| `lookup_incident_memory` | earlier incidents with this alert name | — |
+| `list_source_files`, `read_source_file` | read the repository | any path outside `services/ingestion/` |
+| `restart_deployment` | rollout-restart one deployment and wait for the new pod | names not in `allowlist.yaml`; a second restart within the 30-minute cooldown |
+| `write_source_file` | edit a file in a fresh clone | paths outside `services/ingestion/`; build and configuration files (`pyproject.toml`, `Dockerfile`, `migrations/`, `conftest.py`) |
+| `run_tests` | the ingestion test suite in the clone, with a bare environment | — |
+| `open_pull_request` | push a branch and open or update a pull request | before `run_tests` passed after the last edit; diffs touching `allowlist.yaml`, `services/agent/`, `.github/`, `CODEOWNERS`; attribution lines are stripped |
+| `file_report` | the incident report, stored on the incident and appended to the pull request | — |
+
+There is no shell, kubectl or merge tool. A test asserts that these ten names
+are the whole registry. Refusals come back to the model as tool results and
+are recorded on the incident; nothing raises out of the loop.
+
+### The three tiers
+
+1. **Report** — always. If the model stops without calling `file_report`, the
+   incident stores its last words as an incomplete report.
+2. **Allowlisted action** — `allowlist.yaml` names the deployments the agent
+   may restart and the cooldown. The Kubernetes `Role` bound to the agent's
+   service account grants `get` and `patch` on exactly those deployments, so
+   RBAC mirrors the allowlist.
+3. **Code fix** — the agent works in a fresh clone under `/workspace`,
+   writes a failing test, fixes, runs the suite, and opens a pull request on
+   the branch `agent/<fingerprint>`; a second incident with the same
+   fingerprint updates that pull request instead of opening another. The
+   commit and push happen in a second clone that the model-written tests
+   never ran in, with only the validated paths copied across, and git runs
+   without hooks or inherited configuration.
+
+**Severity gate.** `critical` alerts, and reports that mark `page_human`,
+produce a `incident.page` log line and a Grafana annotation tagged `page`;
+that is where a real notification channel would hang.
+
+### Secrets and cost
+
+`ANTHROPIC_API_KEY` and `GITHUB_TOKEN` live in the `agent-credentials`
+Secret, created by `make demo` from the environment; the GitHub token is a
+fine-grained token with *Contents* and *Pull requests* write access on this
+repository only. The model is `AGENT_MODEL` (default `claude-opus-5-5`). A
+measured run on Opus: the firmware-drift incident, from alert to an open pull
+request, took two minutes, 20 tool calls and about 350 k input / 12 k output
+tokens.
+
+### Known limitation
+
+Model-written tests execute inside the agent pod. They run with a bare
+environment (no API key or token) and cannot change build files, but the
+pod's service-account token is mounted and readable by a test process. That
+token can only patch the one allowlisted deployment, so the blast radius
+equals the agent's own authority; a production deployment would run the test
+suite in a separate job with no service account.
