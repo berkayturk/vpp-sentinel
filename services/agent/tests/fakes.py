@@ -205,13 +205,29 @@ class FakeIncidentStore:
         raise KeyError(incident_id)
 
 
-def prometheus_router(answers: dict[str, list], recorder: Recorder) -> httpx.MockTransport:
-    """Serve /api/v1/query by matching a substring of the expression against ``answers``."""
+def prometheus_router(
+    answers: dict[str, list],
+    recorder: Recorder,
+    before: dict[str, list] | None = None,
+    cutoff: float = 0.0,
+) -> httpx.MockTransport:
+    """Serve /api/v1/query by matching a substring of the expression against ``answers``.
+
+    When ``before`` is given, queries whose ``time`` parameter is earlier than
+    ``cutoff`` (unix seconds) are answered from it instead, so a test can show
+    how a metric moved across the context window.
+    """
+
+    def pick(request: httpx.Request) -> dict[str, list]:
+        at = request.url.params.get("time")
+        if before is not None and at is not None and float(at) < cutoff:
+            return before
+        return answers
 
     def handle(request: httpx.Request) -> httpx.Response:
         recorder.requests.append(request)
         expr = request.url.params.get("query", "")
-        for needle, samples in answers.items():
+        for needle, samples in pick(request).items():
             if needle in expr:
                 return httpx.Response(200, json=prometheus_instant(samples))
         return httpx.Response(200, json=prometheus_instant([]))
