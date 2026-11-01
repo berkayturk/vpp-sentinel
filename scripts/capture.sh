@@ -6,15 +6,15 @@ set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-vpp}"
 OBS_NAMESPACE="${OBS_NAMESPACE:-monitoring}"
-OUT_DIR="${OUT_DIR:-docs}"
+OUT_DIR="${OUT_DIR:-$(cd "$(dirname "$0")/.." && pwd)/docs}"
 
 cleanup() { kill "${PIDS[@]}" 2>/dev/null || true; }
 PIDS=()
 trap cleanup EXIT
 
-kubectl -n "$OBS_NAMESPACE" port-forward svc/obs-prometheus 19090:9090 >/dev/null 2>&1 & PIDS+=($!)
-kubectl -n "$OBS_NAMESPACE" port-forward svc/obs-alertmanager 19093:9093 >/dev/null 2>&1 & PIDS+=($!)
-kubectl -n "$NAMESPACE" port-forward svc/postgres 15432:5432 >/dev/null 2>&1 & PIDS+=($!)
+kubectl -n "$OBS_NAMESPACE" port-forward svc/obs-prometheus 29090:9090 >/dev/null 2>&1 & PIDS+=($!)
+kubectl -n "$OBS_NAMESPACE" port-forward svc/obs-alertmanager 29093:9093 >/dev/null 2>&1 & PIDS+=($!)
+kubectl -n "$NAMESPACE" port-forward svc/postgres 25432:5432 >/dev/null 2>&1 & PIDS+=($!)
 sleep 3
 
 # Facts only the cluster knows, handed to the driver as plain values (never the secret itself).
@@ -25,9 +25,9 @@ AGENT_READY=$(kubectl -n "$NAMESPACE" logs deploy/agent -c agent --tail=200 2>/d
 AGENT_MODEL=$(kubectl -n "$NAMESPACE" get deploy agent -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AGENT_MODEL")].value}')
 DB_PASSWORD=$(kubectl -n "$NAMESPACE" get secret postgres-credentials -o jsonpath='{.data.DATABASE_URL}' | base64 -d | sed -E 's#.*://[^:]+:([^@]+)@.*#\1#')
 
-export DATABASE_URL="postgresql://vpp:${DB_PASSWORD}@127.0.0.1:15432/vpp"
-export PROMETHEUS_URL="http://127.0.0.1:19090"
-export ALERTMANAGER_URL="http://127.0.0.1:19093"
+export DATABASE_URL="postgresql://vpp:${DB_PASSWORD}@127.0.0.1:25432/vpp"
+export PROMETHEUS_URL="http://127.0.0.1:29090"
+export ALERTMANAGER_URL="http://127.0.0.1:29093"
 export CAPTURE_SECRET_KEYS="$SECRET_KEYS"
 export CAPTURE_AGENT_READY="$AGENT_READY"
 export CAPTURE_AGENT_MODEL="$AGENT_MODEL"

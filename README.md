@@ -15,19 +15,19 @@ the platform-health role asks for.
 
 1. **A site goes dark.** Forty percent of one site's chargers switch to a new
    firmware and the platform stops storing their telemetry. The alert fires
-   <<KPI:drift-detection>> after the fault is injected.
+   195 s after the fault is injected.
 2. **The agent reads before it acts.** It receives a sanitised, read-only
    context — timing, blast radius ("12 of 30 chargers at como"), severity,
    whether this was seen before, the warning logs and the runbook — then
    queries Prometheus and Loki, reads the ingestion code, writes a failing
    regression test, fixes the parser, and runs the suite in a separate
    container that holds no secrets.
-3. **It opens a pull request it cannot merge.** <<KPI:drift-pr>> after the
+3. **It opens a pull request it cannot merge.** 138 s after the
    alert, the fix and the incident report are on GitHub for a human to
    review: [pull request #1](https://github.com/berkayturk/vpp-sentinel/pull/1).
    The other scenario — a telemetry surge that the single consumer cannot
    absorb — ends with the one action the allowlist permits, a rollout
-   restart, <<KPI:surge-action>> after the alert, and a report that says
+   restart, 73 s after the alert, and a report that says
    plainly it is a mitigation, not a fix.
 
 ![Fleet health dashboard during the firmware-drift incident](docs/images/fleet-health.png)
@@ -39,12 +39,12 @@ table and the protocol are in [docs/kpis.md](docs/kpis.md).
 
 | KPI | Load surge (restart) | Firmware drift (pull request) |
 |---|---|---|
-| Detection: fault injected → alert firing | <<KPI:surge-detection>> | <<KPI:drift-detection>> |
-| Action: alert firing → allowlisted restart | <<KPI:surge-action>> | — |
-| Pull request: alert firing → PR opened | — | <<KPI:drift-pr>> |
-| Report filed after the alert | <<KPI:surge-report>> | <<KPI:drift-report>> |
-| Resolution: alert firing → alert resolved | <<KPI:surge-resolution>> | — |
-| Model cost for both incidents | <<KPI:cost>> | |
+| Detection: fault injected → alert firing | 172 s | 195 s |
+| Action: alert firing → allowlisted restart | 73 s | — |
+| Pull request: alert firing → PR opened | — | 138 s |
+| Report filed after the alert | 124 s | 171 s |
+| Resolution: alert firing → alert resolved | 150 s | — |
+| Model cost for both incidents | 2.80 USD (588 k input / 22 k output tokens, no caching) | |
 
 The agent's own report for the firmware-drift incident is in
 [docs/sample-report.md](docs/sample-report.md), copied verbatim from the

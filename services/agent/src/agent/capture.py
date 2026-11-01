@@ -169,10 +169,10 @@ def render_kpis_md(table: KpiTable, protocol: ProtocolInfo) -> str:
     header = (
         f"Measured on {protocol.date} with `make capture` on a fresh kind cluster"
         f" (`make down`, `make demo`, credentials, then this protocol), model `{protocol.model}`,"
-        f" agent image `{protocol.agent_image}`. Timestamps come from Prometheus (alert"
-        " activation), the `incidents` table (actions, reports, resolution) and the capture"
-        " script's own clock (fault injection, incident opening — polled every"
-        f" {POLL_PRECISION_SECONDS} s, so ±{POLL_PRECISION_SECONDS} s)."
+        f" agent image `{protocol.agent_image}`. Timestamps come from Alertmanager (the moment"
+        " an alert began firing, stored on the incident), the `incidents` table (actions,"
+        " reports, resolution) and the capture script's own clock (fault injection, incident"
+        f" opening — polled every {POLL_PRECISION_SECONDS} s, so ±{POLL_PRECISION_SECONDS} s)."
     )
     rows = [
         ("Detection: fault injected → alert firing", surge.detection_s, drift.detection_s),
@@ -285,9 +285,11 @@ async def _scenario(
     name, body = fault
     injected_at = deps.now()
     await deps.faults.post(name, body)
-    active_at = await _wait(deps, lambda: _alert_active_at(deps, alert), f"{alert} firing")
+    await _wait(deps, lambda: _alert_firing(deps, alert), f"{alert} firing")
     opened = await _wait(deps, lambda: deps.store.find_open(fp), f"incident for {alert}")
     opened_at = deps.now()
+    # The incident row carries Alertmanager's startsAt for the alert: the moment it began firing.
+    active_at = opened.started_at
     done = await _wait(deps, lambda: _with_action(deps, opened.id, action_tool), f"{action_tool}")
     report = await _wait(deps, lambda: _with_action(deps, opened.id, "file_report"), "report")
     resolved_at = None
@@ -329,11 +331,9 @@ async def _no_alert(deps: CaptureDeps) -> bool:
     return not await alertmanager.active_alerts(deps.alertmanager)
 
 
-async def _alert_active_at(deps: CaptureDeps, alert: str) -> datetime | None:
-    samples = await prometheus.instant(deps.prometheus, f'ALERTS_FOR_STATE{{alertname="{alert}"}}')
-    if not samples:
-        return None
-    return datetime.fromtimestamp(min(s.value for s in samples), tz=UTC)
+async def _alert_firing(deps: CaptureDeps, alert: str) -> bool:
+    active = await alertmanager.active_alerts(deps.alertmanager)
+    return any(a.name == alert for a in active)
 
 
 async def _with_action(deps: CaptureDeps, incident_id: int, tool: str) -> Incident | None:
