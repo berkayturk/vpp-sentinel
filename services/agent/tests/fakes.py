@@ -233,3 +233,55 @@ def prometheus_router(
         return httpx.Response(200, json=prometheus_instant([]))
 
     return httpx.MockTransport(handle)
+
+
+# --- workspace -------------------------------------------------------------------
+
+
+class FakeWorkspace:
+    """An in-memory Workspace: files by repository-relative path, scripted test results."""
+
+    def __init__(self, root, files: dict[str, str]) -> None:
+        self.root = root
+        self.files = dict(files)
+        self.changed: tuple[str, ...] | None = None
+        self.written: list[str] = []
+        self.tests_pass = True
+        self.test_output = "3 passed"
+        self.pushed: list[tuple[str, str]] = []
+        self.prepared = 0
+
+    async def prepare(self) -> None:
+        self.prepared += 1
+
+    def _rel(self, path) -> str:
+        return path.resolve().relative_to(self.root.resolve()).as_posix()
+
+    async def read(self, path) -> str:
+        rel = self._rel(path)
+        if rel not in self.files:
+            from agent.workspace import WorkspaceError
+
+            raise WorkspaceError(f"{rel}: no such file")
+        return self.files[rel]
+
+    async def write(self, path, content: str) -> None:
+        rel = self._rel(path)
+        self.files[rel] = content
+        self.written.append(rel)
+
+    async def list(self, path) -> tuple[str, ...]:
+        rel = self._rel(path)
+        return tuple(sorted(p.split("/")[-1] for p in self.files if p.startswith(rel + "/")))
+
+    async def changed_paths(self) -> tuple[str, ...]:
+        return self.changed if self.changed is not None else tuple(self.written)
+
+    async def run_tests(self):
+        from agent.workspace import TestResult
+
+        return TestResult(self.tests_pass, self.test_output)
+
+    async def commit_and_push(self, branch: str, message: str) -> str:
+        self.pushed.append((branch, message))
+        return "0" * 40
