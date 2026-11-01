@@ -153,6 +153,10 @@ def compute_kpis(obs: Observations) -> KpiTable:
     )
 
 
+def _kpi_line(label: str, a: float | str | None, b: float | str | None, why: str) -> str:
+    return f"| {label} | {_cell(a, why)} | {_cell(b, why)} |"
+
+
 def _cell(value: float | str | None, why: str) -> str:
     if isinstance(value, str):
         return value
@@ -198,17 +202,15 @@ def render_kpis_md(table: KpiTable, protocol: ProtocolInfo) -> str:
         "",
         "| KPI | Load surge (restart) | Firmware drift (pull request) |",
         "|---|---|---|",
-        *(
-            f"| {label} | {_cell(a, why[label.split(':')[0]])} | {_cell(b, why[label.split(':')[0]])} |"
-            for label, a, b in rows
-        ),
+        *(_kpi_line(label, a, b, why[label.split(":")[0]]) for label, a, b in rows),
         "",
         "| Whole protocol | |",
         "|---|---|",
         f"| Alerts fired → actions taken | {table.alert_to_action_ratio} |",
         f"| Tool calls / refusals | {table.tool_calls} / {table.refusals} |",
         "| Model tokens (input / output / cache read) |"
-        f" {tokens.get('input', 0):,} / {tokens.get('output', 0):,} / {tokens.get('cache_read', 0):,} |",
+        f" {tokens.get('input', 0):,} / {tokens.get('output', 0):,}"
+        f" / {tokens.get('cache_read', 0):,} |",
         f"| Cost at list prices ({PRICES_DATE}: input {prices['input']:g} USD, output"
         f" {prices['output']:g} USD, cache read {prices['cache_read']:g} USD per million tokens)"
         f" | {table.cost_usd:.2f} USD |",
