@@ -347,3 +347,28 @@ async def test_filed_report_is_appended_to_the_open_pull_request(setup):
     assert patched["body"].startswith("Problem and change.")
     assert "# Incident report" in patched["body"] and "## Hypothesis" in patched["body"]
     assert ts.report is not None and ts.report.pull_request_url == "https://github.com/o/r/pull/42"
+
+
+async def test_pull_request_text_and_appended_report_are_sanitised(setup):
+    rec = Recorder()
+    ts = await _toolset(setup, github=client(_github_router(rec)))
+    await ts.write_source_file(path="services/ingestion/tests/test_fix.py", content="x")
+    await ts.run_tests()
+    await ts.open_pull_request(
+        title="Fix como-charger-012 parsing", body="token ghp_abcdefABCDEF123456 from 10.244.0.9"
+    )
+    await ts.file_report(
+        summary="device como-charger-012 rejected",
+        blast_radius="b",
+        hypothesis="h",
+        evidence=["saw sk-ant-api03-secretsecret in a log"],
+        verification=["v"],
+        recommended_action="r\n\nCo-Authored-By: Robot <r@x>",
+        seen_before=False,
+        mitigation_not_fix=False,
+        page_human=False,
+    )
+    sent = "\n".join(r.read().decode() for r in rec.requests if r.method in ("POST", "PATCH"))
+    for leak in ("como-charger-012", "ghp_", "10.244.0.9", "sk-ant-", "Co-Authored-By"):
+        assert leak not in sent
+    assert "como-charger-#" in sent

@@ -278,8 +278,8 @@ class ToolSet:
         if not decision.allowed:
             return await self._record("open_pull_request", args, f"REFUSED: {decision.reason}")
         branch = BRANCH_PREFIX + slug(self.deps.incident.fingerprint)
-        clean_title = _strip_attribution(title).strip()
-        clean_body = _strip_attribution(body).strip()
+        clean_title = self._public_text(title)
+        clean_body = self._public_text(body)
         try:
             await self.deps.workspace.commit_and_push(
                 branch, f"fix(ingestion): {clean_title}", changed
@@ -374,13 +374,21 @@ class ToolSet:
         pr, title, body = self._pull_request
         try:
             await github.update_pr(
-                self.deps.github, self.deps.repo, pr.number, title, f"{body}\n\n---\n\n{rendered}"
+                self.deps.github,
+                self.deps.repo,
+                pr.number,
+                title,
+                f"{body}\n\n---\n\n{self._public_text(rendered)}",
             )
         except ClientError as exc:
             return f"; could not append it to the pull request ({exc})"
         return "; appended to the pull request"
 
     # --- plumbing ----------------------------------------------------------------
+
+    def _public_text(self, text: str) -> str:
+        """Anything that leaves for GitHub: no attribution lines, no identifiers, no secrets."""
+        return sanitize_text(_strip_attribution(text), self.deps.salt).strip()
 
     def _done(self, tool: str, args: dict[str, Any], outcome: str) -> str:
         clean = sanitize_text(outcome, self.deps.salt)
