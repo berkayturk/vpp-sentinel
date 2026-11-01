@@ -125,3 +125,95 @@ def loki_lines(lines: list[tuple[int, str]]) -> dict:
 
 def json_line(**fields: object) -> str:
     return json.dumps(fields)
+
+
+# --- incident store ------------------------------------------------------------
+
+
+class FakeIncidentStore:
+    """In-memory IncidentStore with the same semantics as the Postgres one."""
+
+    def __init__(self, seeded: tuple = ()) -> None:
+        from agent.memory import Incident  # local import keeps fakes importable early
+
+        self._incident_cls = Incident
+        self.rows: list = list(seeded)
+        self._next_id = max((i.id for i in self.rows), default=0) + 1
+
+    async def open(self, alert):
+        from agent.fingerprint import fingerprint
+
+        incident = self._incident_cls(
+            id=self._next_id,
+            fingerprint=fingerprint(alert),
+            alert_name=alert.name,
+            site=alert.labels.get("site"),
+            device_type=alert.labels.get("device_type"),
+            severity=alert.severity,
+            started_at=alert.starts_at,
+            resolved_at=None,
+            report_md="",
+            actions_taken=(),
+            outcome=None,
+        )
+        self._next_id += 1
+        self.rows.append(incident)
+        return incident
+
+    async def find_open(self, fingerprint: str):
+        for row in self.rows:
+            if row.fingerprint == fingerprint and row.resolved_at is None:
+                return row
+        return None
+
+    async def record_action(self, incident_id: int, action):
+        return self._replace(incident_id, lambda i: i.with_action(action))
+
+    async def save_report(self, incident_id: int, report_md: str):
+        return self._replace(incident_id, lambda i: i.with_report(report_md))
+
+    async def resolve(self, incident_id: int, outcome: str):
+        from datetime import UTC, datetime
+
+        return self._replace(incident_id, lambda i: i.resolved(datetime.now(UTC), outcome))
+
+    async def recent_like(self, alert_name: str, limit: int = 3):
+        done = [r for r in self.rows if r.alert_name == alert_name and r.resolved_at is not None]
+        return tuple(sorted(done, key=lambda r: r.started_at, reverse=True)[:limit])
+
+    async def last_restart_at(self, fingerprint: str):
+        from datetime import datetime
+
+        times = [
+            datetime.fromisoformat(a["at"])
+            for r in self.rows
+            if r.fingerprint == fingerprint
+            for a in r.actions_taken
+            if a.get("tool") == "restart_deployment" and a.get("outcome") == "ok"
+        ]
+        return max(times) if times else None
+
+    async def close(self) -> None:
+        return None
+
+    def _replace(self, incident_id: int, change):
+        for index, row in enumerate(self.rows):
+            if row.id == incident_id:
+                updated = change(row)
+                self.rows[index] = updated
+                return updated
+        raise KeyError(incident_id)
+
+
+def prometheus_router(answers: dict[str, list], recorder: Recorder) -> httpx.MockTransport:
+    """Serve /api/v1/query by matching a substring of the expression against ``answers``."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        recorder.requests.append(request)
+        expr = request.url.params.get("query", "")
+        for needle, samples in answers.items():
+            if needle in expr:
+                return httpx.Response(200, json=prometheus_instant(samples))
+        return httpx.Response(200, json=prometheus_instant([]))
+
+    return httpx.MockTransport(handle)
